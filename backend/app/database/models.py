@@ -16,6 +16,7 @@ class User(Base):
     contacts = relationship("TrustedContact", back_populates="owner", cascade="all, delete-orphan")
     journeys = relationship("Journey", back_populates="user", cascade="all, delete-orphan")
     sos_alerts = relationship("SOSAlert", back_populates="user", cascade="all, delete-orphan")
+    refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
 
 
 class TrustedContact(Base):
@@ -63,10 +64,49 @@ class SOSAlert(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    location_lat = Column(Float, nullable=True)
-    location_lng = Column(Float, nullable=True)
+    location_lat = Column(String, nullable=True) # Encrypted location data (symmetric string token)
+    location_lng = Column(String, nullable=True) # Encrypted location data (symmetric string token)
     status = Column(String, default="active")           # active, resolved
     trigger_source = Column(String, default="button")   # button, voice, anomaly
     triggered_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     user = relationship("User", back_populates="sos_alerts")
+    delivery_logs = relationship("SOSDeliveryLog", back_populates="sos_alert", cascade="all, delete-orphan")
+
+
+class SOSDeliveryLog(Base):
+    __tablename__ = "sos_delivery_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sos_id = Column(Integer, ForeignKey("sos_alerts.id", ondelete="CASCADE"), nullable=False)
+    channel = Column(String, nullable=False)            # sms, whatsapp, fcm
+    recipient = Column(String, nullable=False)          # phone number or device fcm token
+    status = Column(String, default="pending")          # pending, sent, delivered, failed
+    attempt = Column(Integer, default=1)
+    error_message = Column(String, nullable=True)
+    raw_api_response = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    sos_alert = relationship("SOSAlert", back_populates="delivery_logs")
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token = Column(String, unique=True, index=True, nullable=False) # Hashed token
+    expires_at = Column(DateTime, nullable=False)
+    revoked = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    user = relationship("User", back_populates="refresh_tokens")
+
+
+class AdminNotification(Base):
+    __tablename__ = "admin_notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    message = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    read = Column(Boolean, default=False)

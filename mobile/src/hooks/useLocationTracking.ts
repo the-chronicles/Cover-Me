@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import * as Location from 'expo-location';
 import * as Battery from 'expo-battery';
 import { Platform } from 'react-native';
-import { API_BASE_URL, apiService } from '../services/api';
+import { API_BASE_URL, apiService, apiFetch } from '../services/api';
 import { authStorage } from '../services/auth';
 
 export interface GPSLocation {
@@ -82,20 +82,23 @@ export function useLocationTracking(isTrackingActive: boolean = false) {
   };
 
   // 3. Fetch current coordinates once (for dashboard)
-  const fetchCurrentLocation = async () => {
+  const fetchCurrentLocation = async (): Promise<GPSLocation | null> => {
     const hasPermission = await requestLocationPermissions();
-    if (!hasPermission) return;
+    if (!hasPermission) return null;
 
     try {
       const current = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
-      setLocation({
+      const coords = {
         latitude: current.coords.latitude,
         longitude: current.coords.longitude,
-      });
+      };
+      setLocation(coords);
+      return coords;
     } catch (err) {
       console.warn('Could not retrieve current position, defaulting coordinates.', err);
+      return null;
     }
   };
 
@@ -106,7 +109,7 @@ export function useLocationTracking(isTrackingActive: boolean = false) {
       const token = await authStorage.getToken();
       if (!token) return; // Only sync location if user is authenticated
 
-      const response = await fetch(`${API_BASE_URL}/location/update`, {
+      const response = await apiFetch(`${API_BASE_URL}/location/update`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -150,7 +153,7 @@ export function useLocationTracking(isTrackingActive: boolean = false) {
       // Developer simulation path (Yaba -> Ikeja) for emulators / web
       if (!hasPermission || Platform.OS === 'web') {
         const simSpeed = isPowerSavingMode ? 30000 : 8000; // 30s in power saving vs 8s normal
-        console.log(`[GPS Tracking] Using Simulated Nigeria Route updates (ECO Mode: ${isPowerSavingMode ? 'YES (30s interval)' : 'NO (8s interval)'})...`);
+        console.log(`[GPS Tracking] Using Simulated Nigeria Route updates (Power Saving Mode: ${isPowerSavingMode ? 'YES (30s interval)' : 'NO (8s interval)'})...`);
         
         let step = 0;
         const simulatedCoords = [
@@ -174,10 +177,10 @@ export function useLocationTracking(isTrackingActive: boolean = false) {
 
       // Device GPS tracking
       try {
-        const trackingInterval = isPowerSavingMode ? 60000 : 10000; // 60 seconds eco vs 10 seconds normal
-        const trackingDistance = isPowerSavingMode ? 50 : 10;      // 50 meters eco vs 10 meters normal
+        const trackingInterval = isPowerSavingMode ? 60000 : 10000; // 60 seconds power saving vs 10 seconds normal
+        const trackingDistance = isPowerSavingMode ? 50 : 10;      // 50 meters power saving vs 10 meters normal
         
-        console.log(`[GPS Tracking] Profile: ${isPowerSavingMode ? 'POWER SAVING/ECO' : 'NORMAL'}. Interval: ${trackingInterval}ms, Distance: ${trackingDistance}m`);
+        console.log(`[GPS Tracking] Profile: ${isPowerSavingMode ? 'POWER SAVING' : 'NORMAL'}. Interval: ${trackingInterval}ms, Distance: ${trackingDistance}m`);
 
         trackingSubscription.current = await Location.watchPositionAsync(
           {

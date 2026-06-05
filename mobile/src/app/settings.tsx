@@ -3,7 +3,6 @@ import {
   StyleSheet,
   View,
   Pressable,
-  Alert,
   ActivityIndicator,
   ScrollView,
   Platform,
@@ -11,6 +10,7 @@ import {
   TextInput,
   Linking
 } from 'react-native';
+import { useAlert } from '@/context/AlertToastContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { ThemedText } from '@/components/themed-text';
@@ -19,13 +19,14 @@ import { apiService } from '@/services/api';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/use-theme';
 import { useRouter } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
+import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 
 export default function SettingsScreen() {
   const theme = useTheme();
   const router = useRouter();
   const { user, signOut, updateUser, themePreference, setThemePreference } = useAuth();
+  const { showAlert, showToast } = useAlert();
 
   const [editMode, setEditMode] = useState(false);
   const [name, setName] = useState(user?.full_name || '');
@@ -42,7 +43,7 @@ export default function SettingsScreen() {
 
   const handleSaveProfile = async () => {
     if (!name.trim() || !phone.trim()) {
-      Alert.alert('Validation Error', 'Full Name and Phone Number cannot be empty.');
+      showToast('Full Name and Phone Number cannot be empty.', 'error');
       return;
     }
 
@@ -57,9 +58,9 @@ export default function SettingsScreen() {
       // Update local state (context & storage)
       await updateUser(updatedUser);
       setEditMode(false);
-      Alert.alert('Profile Updated', 'Your profile details have been saved successfully.');
+      showToast('Your profile details have been saved successfully.', 'success');
     } catch (err: any) {
-      Alert.alert('Update Failed', err.message || 'Could not update profile details.');
+      showToast(err.message || 'Could not update profile details.', 'error');
     } finally {
       setSaving(false);
     }
@@ -75,16 +76,16 @@ export default function SettingsScreen() {
         if (supported) {
           await Linking.openURL(url);
         } else {
-          Alert.alert('Error', `Cannot open web link: ${url}`);
+          showToast(`Cannot open web link: ${url}`, 'error');
         }
       }
     } catch (err) {
-      Alert.alert('Error', 'Failed to open the in-app browser.');
+      showToast('Failed to open the in-app browser.', 'error');
     }
   };
 
   const handleSignOut = () => {
-    Alert.alert(
+    showAlert(
       'Sign Out',
       'Are you sure you want to sign out of your account?',
       [
@@ -95,6 +96,35 @@ export default function SettingsScreen() {
           onPress: async () => {
             await signOut();
             router.replace('/login');
+          }
+        }
+      ]
+    );
+  };
+
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteAccount = () => {
+    showAlert(
+      'Delete Account',
+      'Are you absolutely sure you want to delete your account? This will permanently delete your profile, contacts, journeys, and SOS history. This action is irreversible.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              await apiService.deleteAccount();
+              await signOut();
+              router.replace('/login');
+              showToast('Your account has been deleted.', 'success');
+            } catch (err: any) {
+              showToast(err.message || 'Could not delete account.', 'error');
+            } finally {
+              setDeleting(false);
+            }
           }
         }
       ]
@@ -113,14 +143,10 @@ export default function SettingsScreen() {
               pressed && { opacity: 0.7 }
             ]}
           >
-            {Platform.OS === 'ios' ? (
-              <SymbolView name="chevron.left" tintColor={theme.primary} size={24} />
-            ) : (
-              <Text style={{ fontSize: 24, color: theme.primary }}>◀</Text>
-            )}
+            <Ionicons name="arrow-back" size={24} color={theme.primary} />
           </Pressable>
           <ThemedText style={styles.headerTitle}>Settings</ThemedText>
-          <View style={{ width: 40 }} /> {/* Spacer to balance header */}
+          <View style={{ width: 40 }} />
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -278,11 +304,7 @@ export default function SettingsScreen() {
                 ]}
               >
                 <ThemedText>Privacy Policy</ThemedText>
-                {Platform.OS === 'ios' ? (
-                  <SymbolView name="chevron.right" tintColor={theme.textSecondary} size={16} />
-                ) : (
-                  <Text style={{ color: theme.textSecondary }}>▶</Text>
-                )}
+                <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
               </Pressable>
 
               <Pressable
@@ -293,11 +315,7 @@ export default function SettingsScreen() {
                 ]}
               >
                 <ThemedText>Terms of Service</ThemedText>
-                {Platform.OS === 'ios' ? (
-                  <SymbolView name="chevron.right" tintColor={theme.textSecondary} size={16} />
-                ) : (
-                  <Text style={{ color: theme.textSecondary }}>▶</Text>
-                )}
+                <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
               </Pressable>
 
               <Pressable
@@ -308,11 +326,7 @@ export default function SettingsScreen() {
                 ]}
               >
                 <ThemedText>Help & Support</ThemedText>
-                {Platform.OS === 'ios' ? (
-                  <SymbolView name="chevron.right" tintColor={theme.textSecondary} size={16} />
-                ) : (
-                  <Text style={{ color: theme.textSecondary }}>▶</Text>
-                )}
+                <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
               </Pressable>
             </View>
           </ThemedView>
@@ -332,8 +346,31 @@ export default function SettingsScreen() {
                 pressed && { opacity: 0.9 }
               ]}
             >
-              <ThemedText style={styles.signOutText}>Sign Out of CoverMe</ThemedText>
+              <ThemedText style={styles.signOutText}>Sign Out</ThemedText>
             </Pressable>
+          </ThemedView>
+
+          {/* Danger Zone: Account Deletion Card */}
+          <ThemedView type="backgroundElement" style={[styles.card, { borderColor: '#EF4444', borderWidth: 1 }]}>
+            <ThemedText style={[styles.cardTitle, { color: '#EF4444' }]}>Danger Zone</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.cardSubtitle}>
+              Permanently delete your CoverMe account and remove all related data from our servers.
+            </ThemedText>
+
+            {deleting ? (
+              <ActivityIndicator size="small" color="#EF4444" style={{ marginVertical: 10 }} />
+            ) : (
+              <Pressable
+                onPress={handleDeleteAccount}
+                style={({ pressed }) => [
+                  styles.deleteButton,
+                  { backgroundColor: '#EF4444' },
+                  pressed && { opacity: 0.9 }
+                ]}
+              >
+                <ThemedText style={styles.deleteButtonText}>Delete Account</ThemedText>
+              </Pressable>
+            )}
           </ThemedView>
 
         </ScrollView>
@@ -480,6 +517,17 @@ const styles = StyleSheet.create({
     marginTop: Spacing.one,
   },
   signOutText: {
+    color: '#F8FAFC',
+    fontWeight: 'bold',
+    fontSize: 15,
+  },
+  deleteButton: {
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: Spacing.one,
+  },
+  deleteButtonText: {
     color: '#F8FAFC',
     fontWeight: 'bold',
     fontSize: 15,

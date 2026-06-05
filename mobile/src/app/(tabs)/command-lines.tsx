@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, TextInput, Pressable, ScrollView, Alert, Linking, ActivityIndicator, FlatList } from 'react-native';
+import { StyleSheet, View, TextInput, Pressable, ScrollView, Linking, ActivityIndicator, FlatList } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useAlert } from '@/context/AlertToastContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { ThemedText } from '@/components/themed-text';
@@ -21,6 +23,7 @@ const OFFLINE_CATALOG: CommandLine[] = [
 
 export default function CommandLinesScreen() {
   const theme = useTheme();
+  const { showAlert } = useAlert();
   const [stateFilter, setStateFilter] = useState<'All' | 'Lagos' | 'Oyo' | 'Ogun' | 'Ondo' | 'Osun'>('All');
   const [lgaSearch, setLgaSearch] = useState('');
   const [facilities, setFacilities] = useState<CommandLine[]>([]);
@@ -55,7 +58,7 @@ export default function CommandLinesScreen() {
   }, [stateFilter, lgaSearch]);
 
   const handleCall = (phoneNumber: string, name: string) => {
-    Alert.alert(
+    showAlert(
       'Place Direct Call',
       `Dial emergency hotline for ${name} (${phoneNumber})?`,
       [
@@ -65,12 +68,16 @@ export default function CommandLinesScreen() {
     );
   };
 
-  const getIconForType = (type: string) => {
+  const renderIconForType = (type: string) => {
     switch (type.toLowerCase()) {
-      case 'police': return '👮';
-      case 'hospital': return '🏥';
-      case 'fire': return '🚒';
-      default: return '📞';
+      case 'police':
+        return <Ionicons name="shield-checkmark" size={20} color="#2563EB" />;
+      case 'hospital':
+        return <Ionicons name="medical" size={20} color="#EF4444" />;
+      case 'fire':
+        return <Ionicons name="flame" size={20} color="#F59E0B" />;
+      default:
+        return <Ionicons name="call" size={20} color={theme.textSecondary} />;
     }
   };
 
@@ -117,7 +124,10 @@ export default function CommandLinesScreen() {
         {/* Offline indicator */}
         {offlineMode && (
           <View style={styles.offlineBanner}>
-            <ThemedText style={styles.offlineBannerText}>⚠️ Offline Catalog Loaded</ThemedText>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons name="warning" size={14} color="#D97706" />
+              <ThemedText style={styles.offlineBannerText}>Offline Catalog Loaded</ThemedText>
+            </View>
           </View>
         )}
 
@@ -136,7 +146,9 @@ export default function CommandLinesScreen() {
               renderItem={({ item }) => (
                 <ThemedView type="backgroundElement" style={styles.card}>
                   <View style={styles.cardHeader}>
-                    <ThemedText style={styles.facilityIcon}>{getIconForType(item.facility_type)}</ThemedText>
+                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: theme.backgroundSelected, alignItems: 'center', justifyContent: 'center' }}>
+                      {renderIconForType(item.facility_type)}
+                    </View>
                     <View style={styles.facilityTitleCol}>
                       <ThemedText style={[styles.facilityName, { color: theme.text }]}>{item.facility_name}</ThemedText>
                       <ThemedText type="small" themeColor="textSecondary" style={styles.facilityMeta}>
@@ -145,7 +157,10 @@ export default function CommandLinesScreen() {
                     </View>
                   </View>
                   <Pressable style={[styles.callBtn, { backgroundColor: theme.backgroundSelected }]} onPress={() => handleCall(item.phone_number, item.facility_name)}>
-                    <ThemedText style={[styles.callBtnText, { color: theme.text }]}>📞 Call Division: {item.phone_number}</ThemedText>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="call" size={13} color={theme.text} />
+                      <ThemedText style={[styles.callBtnText, { color: theme.text }]}>Call Division: {item.phone_number}</ThemedText>
+                    </View>
                   </Pressable>
                 </ThemedView>
               )}

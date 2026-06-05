@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react';
-import { Alert, NativeModules } from 'react-native';
+import { NativeModules } from 'react-native';
+import { useAlert } from '@/context/AlertToastContext';
 import * as Location from 'expo-location';
 import { apiService } from '@/services/api';
 import { useAuth } from '@/hooks/useAuth';
 
 export function useVolumeTrigger() {
   const { token } = useAuth();
+  const { showAlert } = useAlert();
   const pressTimestamps = useRef<number[]>([]);
   const isTriggering = useRef(false);
   const lastVolume = useRef<number | null>(null);
@@ -55,8 +57,8 @@ export function useVolumeTrigger() {
             isTriggering.current = true;
             pressTimestamps.current = []; // Reset buffer immediately to prevent double triggers
 
-            Alert.alert(
-              "🚨 Volume Panic Triggered",
+            showAlert(
+              "Volume Panic Triggered",
               "Emergency SOS hardware trigger sequence detected! Sending coordinates to safety watch circle...",
               [{ text: "OK" }]
             );
@@ -81,12 +83,12 @@ export function useVolumeTrigger() {
             try {
               // Send SOS alert to API
               await apiService.triggerSOS(lat, lng, 'volume_button');
-              Alert.alert(
+              showAlert(
                 "SOS Sent Successfully",
                 "Broadcasted alerts to emergency contacts via Termii SMS and WhatsApp Cloud APIs."
               );
             } catch (err) {
-              Alert.alert(
+              showAlert(
                 "SOS Trigger Error",
                 "Failed to route emergency signal via server. Please use manual SMS fallback if offline."
               );

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, TextInput, Pressable, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { StyleSheet, View, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Image } from 'react-native';
+import { useAlert } from '@/context/AlertToastContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, MaxContentWidth } from '@/constants/theme';
 import { ThemedText } from '@/components/themed-text';
@@ -10,15 +11,21 @@ import { useTheme } from '@/hooks/use-theme';
 
 export default function LoginScreen() {
   const theme = useTheme();
+  const isDark = theme.background === '#0F172A';
+  const logoSource = isDark
+    ? require('../../assets/images/CoverMe Logo slimW.png')
+    : require('../../assets/images/CoverMe Logo Dark.png');
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const { signIn } = useAuth();
   const router = useRouter();
+  const { showToast } = useAlert();
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert('Incomplete Form', 'Please enter your email and password.');
+      showToast('Please enter your email and password.', 'error');
       return;
     }
 
@@ -28,7 +35,7 @@ export default function LoginScreen() {
       // Auth success redirects to index screen automatically through layout routing
       router.replace('/');
     } catch (error: any) {
-      Alert.alert('Authentication Failed', error.message || 'Incorrect email or password.');
+      showToast(error.message || 'Incorrect email or password.', 'error');
     } finally {
       setLoading(false);
     }
@@ -43,8 +50,7 @@ export default function LoginScreen() {
         >
           <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
             <View style={styles.branding}>
-              <ThemedText style={styles.brandTitle}>CoverMe</ThemedText>
-              <ThemedText themeColor="textSecondary" style={styles.brandSlogan}>never walk alone.</ThemedText>
+              <Image source={logoSource} style={styles.brandLogo} resizeMode="contain" />
             </View>
 
             <ThemedView type="backgroundElement" style={styles.formCard}>
@@ -125,17 +131,11 @@ const styles = StyleSheet.create({
   },
   branding: {
     alignItems: 'center',
-    marginBottom: Spacing.five,
+    marginBottom: Spacing.four,
   },
-  brandTitle: {
-    fontSize: 40,
-    fontWeight: 'bold',
-    color: '#2563EB',
-  },
-  brandSlogan: {
-    fontSize: 16,
-    fontStyle: 'italic',
-    marginTop: Spacing.half,
+  brandLogo: {
+    width: 200,
+    height: 200,
   },
   formCard: {
     padding: Spacing.four,

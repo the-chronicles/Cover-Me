@@ -1,0 +1,336 @@
+{% extends "sqladmin/layout.html" %}
+
+{% block content %}
+<div class="container-xl">
+  <!-- Page Header -->
+  <div class="page-header d-print-none">
+    <div class="row align-items-center">
+      <div class="col-auto">
+        <h2 class="page-title" style="font-size: 1.6rem; font-weight: 700;">
+          Dashboard
+        </h2>
+        <div class="text-muted mt-1">Welcome back, Admin. Here's what's happening with CoverMe.</div>
+      </div>
+      <div class="col-auto ms-auto">
+        <span class="badge bg-green-lt" style="font-size: 0.85rem; padding: 6px 14px;">
+          <i class="fa-solid fa-circle" style="font-size: 8px; margin-right: 6px;"></i>
+          Server Online
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- System Alerts & Activity -->
+  {% if stats.recent_notifications %}
+  <div class="row mt-2">
+    <div class="col-12">
+      <div class="card bg-orange-lt border-orange">
+        <div class="card-body py-3">
+          <h3 class="card-title text-orange mb-2" style="font-size: 0.95rem; font-weight: 700;">
+            <i class="fa-solid fa-bell me-2"></i> System Alerts & Activity
+          </h3>
+          <ul class="list-unstyled mb-0" style="font-size: 0.88rem; line-height: 1.6;">
+            {% for notif in stats.recent_notifications %}
+            <li class="d-flex justify-content-between align-items-center {% if not loop.last %}border-bottom pb-2 mb-2{% endif %}">
+              <div>
+                <i class="fa-solid fa-circle-exclamation text-orange me-2"></i>
+                {{ notif.message }}
+              </div>
+              <span class="text-muted" style="font-size: 0.78rem;">
+                {{ notif.created_at.strftime('%b %d, %H:%M') if notif.created_at else '-' }}
+              </span>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Stats Row -->
+  <div class="row row-deck row-cards mt-3">
+    <!-- Total Users -->
+    <div class="col-sm-6 col-lg-3">
+      <div class="card">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div class="subheader">Total Users</div>
+          </div>
+          <div class="h1 mb-0 mt-2" style="font-size: 2rem; font-weight: 800;">{{ stats.total_users }}</div>
+          <div class="d-flex mt-2">
+            <div class="text-muted">
+              <i class="fa-solid fa-users" style="color: #2563eb;"></i>
+              Registered accounts
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Journeys -->
+    <div class="col-sm-6 col-lg-3">
+      <div class="card">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div class="subheader">Active Journeys</div>
+          </div>
+          <div class="h1 mb-0 mt-2" style="font-size: 2rem; font-weight: 800; color: #10b981;">{{ stats.active_journeys
+            }}</div>
+          <div class="d-flex mt-2">
+            <div class="text-muted">
+              <i class="fa-solid fa-route" style="color: #10b981;"></i>
+              Currently being tracked
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SOS Alerts -->
+    <div class="col-sm-6 col-lg-3">
+      <div class="card">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div class="subheader">SOS Alerts (Total)</div>
+          </div>
+          <div class="h1 mb-0 mt-2" style="font-size: 2rem; font-weight: 800; color: #ef4444;">{{ stats.total_sos }}
+          </div>
+          <div class="d-flex mt-2">
+            <span class="text-orange d-inline-flex align-items-center lh-1 me-2">
+              {{ stats.active_sos }} active
+            </span>
+            <div class="text-muted">
+              alerts right now
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Delivery Success Rate -->
+    <div class="col-sm-6 col-lg-3">
+      <div class="card">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div class="subheader">Delivery Rate</div>
+          </div>
+          <div class="h1 mb-0 mt-2"
+            style="font-size: 2rem; font-weight: 800; color: {% if stats.delivery_rate >= 80 %}#10b981{% elif stats.delivery_rate >= 50 %}#f59e0b{% else %}#ef4444{% endif %};">
+            {{ stats.delivery_rate }}%</div>
+          <div class="d-flex mt-2">
+            <div class="text-muted">
+              <i class="fa-solid fa-paper-plane" style="color: #6366f1;"></i>
+              {{ stats.sent_deliveries }}/{{ stats.total_deliveries }} sent
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Second Row: Detailed Cards -->
+  <div class="row row-deck row-cards mt-2">
+    <!-- Recent SOS Alerts -->
+    <div class="col-lg-7">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">
+            <i class="fa-solid fa-triangle-exclamation" style="color: #ef4444; margin-right: 8px;"></i>
+            Recent SOS Alerts
+          </h3>
+          <div class="card-actions">
+            <a href="/admin/sos-alert/list" class="btn btn-sm btn-outline-primary">
+              View All
+            </a>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>User</th>
+                <th>Source</th>
+                <th>Status</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for alert in stats.recent_sos %}
+              <tr>
+                <td><span class="badge bg-red-lt">#{{ alert.id }}</span></td>
+                <td>
+                  <div class="d-flex align-items-center">
+                    <span class="avatar avatar-sm rounded-circle bg-blue-lt me-2" style="font-size: 0.7rem;">
+                      {{ alert.user_name[:2] | upper if alert.user_name else '??' }}
+                    </span>
+                    {{ alert.user_name or 'Unknown' }}
+                  </div>
+                </td>
+                <td>
+                  {% if alert.trigger_source == 'voice' %}
+                  <span class="badge bg-purple-lt"><i class="fa-solid fa-microphone"></i> Voice</span>
+                  {% elif alert.trigger_source == 'button' %}
+                  <span class="badge bg-red-lt"><i class="fa-solid fa-circle-exclamation"></i> Button</span>
+                  {% else %}
+                  <span class="badge bg-yellow-lt"><i class="fa-solid fa-bolt"></i> {{ alert.trigger_source }}</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if alert.status == 'active' %}
+                  <span class="badge bg-orange-lt">Active</span>
+                  {% elif alert.status == 'resolved' %}
+                  <span class="badge bg-green-lt">Resolved</span>
+                  {% else %}
+                  <span class="badge bg-secondary-lt">{{ alert.status }}</span>
+                  {% endif %}
+                </td>
+                <td class="text-muted" style="font-size: 0.82rem;">{{ alert.triggered_at.strftime('%b %d, %H:%M') if
+                  alert.triggered_at else '-' }}</td>
+              </tr>
+              {% endfor %}
+              {% if not stats.recent_sos %}
+              <tr>
+                <td colspan="5" class="text-center text-muted" style="padding: 30px;">
+                  <i class="fa-solid fa-shield-halved" style="font-size: 1.5rem; color: #10b981;"></i>
+                  <div class="mt-2">No SOS alerts triggered yet. All clear.</div>
+                </td>
+              </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Stats Sidebar -->
+    <div class="col-lg-5">
+      <!-- Command Lines Card -->
+      <div class="card mb-3">
+        <div class="card-header">
+          <h3 class="card-title">
+            <i class="fa-solid fa-phone-volume" style="color: #6366f1; margin-right: 8px;"></i>
+            Emergency Services Directory
+          </h3>
+          <div class="card-actions">
+            <a href="/admin/emergency-command-line/list" class="btn btn-sm btn-outline-primary">
+              Manage
+            </a>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-4 text-center">
+              <div style="font-size: 1.5rem; font-weight: 700; color: #2563eb;">{{ stats.police_count }}</div>
+              <div class="text-muted" style="font-size: 0.78rem;">Police</div>
+            </div>
+            <div class="col-4 text-center">
+              <div style="font-size: 1.5rem; font-weight: 700; color: #ef4444;">{{ stats.hospital_count }}</div>
+              <div class="text-muted" style="font-size: 0.78rem;">Hospitals</div>
+            </div>
+            <div class="col-4 text-center">
+              <div style="font-size: 1.5rem; font-weight: 700; color: #f59e0b;">{{ stats.fire_count }}</div>
+              <div class="text-muted" style="font-size: 0.78rem;">Fire Stations</div>
+            </div>
+          </div>
+          <div class="text-center text-muted mt-3" style="font-size: 0.8rem;">
+            {{ stats.total_command_lines }} total entries across {{ stats.states_count }} states
+          </div>
+        </div>
+      </div>
+
+      <!-- Delivery Channel Breakdown -->
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">
+            <i class="fa-solid fa-paper-plane" style="color: #10b981; margin-right: 8px;"></i>
+            Delivery Channels
+          </h3>
+          <div class="card-actions">
+            <a href="/admin/sos-delivery-log/list" class="btn btn-sm btn-outline-primary">
+              Audit Logs
+            </a>
+          </div>
+        </div>
+        <div class="card-body">
+          {% for channel in stats.channel_breakdown %}
+          <div class="d-flex align-items-center mb-3">
+            <div class="me-3">
+              {% if channel.name == 'sms' %}
+              <span class="avatar avatar-sm rounded bg-blue-lt"><i class="fa-solid fa-comment-sms"></i></span>
+              {% elif channel.name == 'whatsapp' %}
+              <span class="avatar avatar-sm rounded bg-green-lt"><i class="fa-brands fa-whatsapp"></i></span>
+              {% elif channel.name == 'fcm' %}
+              <span class="avatar avatar-sm rounded bg-yellow-lt"><i class="fa-solid fa-bell"></i></span>
+              {% else %}
+              <span class="avatar avatar-sm rounded bg-secondary-lt"><i class="fa-solid fa-envelope"></i></span>
+              {% endif %}
+            </div>
+            <div class="flex-fill">
+              <div class="d-flex justify-content-between mb-1">
+                <strong style="text-transform: uppercase; font-size: 0.78rem;">{{ channel.name }}</strong>
+                <span class="text-muted" style="font-size: 0.78rem;">{{ channel.sent }}/{{ channel.total }}</span>
+              </div>
+              <div class="progress progress-sm">
+                <div
+                  class="progress-bar {% if channel.name == 'whatsapp' %}bg-green{% elif channel.name == 'sms' %}bg-blue{% else %}bg-yellow{% endif %}"
+                  style="width: {{ channel.rate }}%;" role="progressbar" aria-valuenow="{{ channel.rate }}"
+                  aria-valuemin="0" aria-valuemax="100">
+                </div>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+          {% if not stats.channel_breakdown %}
+          <div class="text-center text-muted" style="padding: 20px;">
+            <i class="fa-solid fa-inbox" style="font-size: 1.3rem;"></i>
+            <div class="mt-2">No deliveries dispatched yet.</div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sessions Row -->
+  <div class="row row-deck row-cards mt-2">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">
+            <i class="fa-solid fa-key" style="color: #f59e0b; margin-right: 8px;"></i>
+            Active Sessions
+          </h3>
+          <div class="card-actions">
+            <a href="/admin/refresh-token/list" class="btn btn-sm btn-outline-primary">
+              Manage Tokens
+            </a>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="row text-center">
+            <div class="col-4">
+              <div style="font-size: 1.8rem; font-weight: 700; color: #10b981;">{{ stats.active_sessions }}</div>
+              <div class="text-muted">Active Sessions</div>
+            </div>
+            <div class="col-4">
+              <div style="font-size: 1.8rem; font-weight: 700; color: #6b7280;">{{ stats.revoked_sessions }}</div>
+              <div class="text-muted">Revoked</div>
+            </div>
+            <div class="col-4">
+              <div style="font-size: 1.8rem; font-weight: 700; color: #ef4444;">{{ stats.expired_sessions }}</div>
+              <div class="text-muted">Expired</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="text-center text-muted mt-4 mb-3" style="font-size: 0.78rem;">
+    CoverMe Nigeria &mdash; Never walk alone. &bull; Admin Dashboard v1.0
+  </div>
+</div>
+{% endblock %}

@@ -1,22 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Pressable, Alert, ActivityIndicator, ScrollView, Platform, Text } from 'react-native';
+import { StyleSheet, View, Pressable, ActivityIndicator, ScrollView, Platform, Text } from 'react-native';
+import { useAlert } from '@/context/AlertToastContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { apiService, SOSResponse } from '@/services/api';
+import { apiService, SOSResponse, API_BASE_URL } from '@/services/api';
 import { SMSFallbackService } from '@/services/SMSFallbackService';
 import { useSpeechActivation } from '@/hooks/useSpeechActivation';
 import { useLocationTracking } from '@/hooks/useLocationTracking';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/use-theme';
 import { useRouter } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function HomeScreen() {
   const theme = useTheme();
   const router = useRouter();
   const { user, signOut } = useAuth();
+  const { showAlert, showToast } = useAlert();
   const [loading, setLoading] = useState(false);
   const [sosActive, setSosActive] = useState(false);
   const [networkOnline, setNetworkOnline] = useState(true);
@@ -24,7 +26,7 @@ export default function HomeScreen() {
   const [activeSOSInfo, setActiveSOSInfo] = useState<SOSResponse | null>(null);
 
   // Hook for GPS Tracking (inactive tracking mode initially)
-  const { location, batteryLevel, networkLatency, isPowerSavingMode, riskWarning } = useLocationTracking(false);
+  const { location, batteryLevel, networkLatency, isPowerSavingMode, riskWarning, fetchCurrentLocation } = useLocationTracking(false);
 
   // Hook for hands-free activation
   const { isListening, startListening, stopListening } = useSpeechActivation({
@@ -36,22 +38,66 @@ export default function HomeScreen() {
     async function loadContacts() {
       try {
         const raw = await apiService.getContacts();
-        setContacts(raw.map((c: any) => c.phone_number));
+        // Limit to the 3 most recently added contacts
+        const recent = raw.slice(-3);
+        setContacts(recent.map((c: any) => c.phone_number));
       } catch (err) {
-        // Fallback standard guards
-        setContacts(['+2348033011234', '+2348055556666']);
+        setContacts([]);
       }
     }
     loadContacts();
+  }, []);
+
+  // Auto network status checker polling GET / every 10 seconds
+  useEffect(() => {
+    let active = true;
+    async function checkConnection() {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch(`${API_BASE_URL}/`, {
+          method: 'GET',
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (active) {
+          setNetworkOnline(res.ok || res.status < 500);
+        }
+      } catch (err) {
+        if (active) {
+          setNetworkOnline(false);
+        }
+      }
+    }
+
+    checkConnection();
+    const interval = setInterval(checkConnection, 10000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, []);
 
   const handleSOSTrigger = async (source: string = 'button') => {
     setLoading(true);
     setSosActive(true);
 
+    let lat = location.latitude;
+    let lng = location.longitude;
+
+    try {
+      const fresh = await fetchCurrentLocation();
+      if (fresh) {
+        lat = fresh.latitude;
+        lng = fresh.longitude;
+      }
+    } catch (err) {
+      console.warn("Could not retrieve current position for SOS, using cached coordinates.", err);
+    }
+
     try {
       if (!networkOnline) {
-        Alert.alert(
+        showAlert(
           'Device is Offline',
           'Choose an offline emergency fallback route to broadcast your location:',
           [
@@ -60,11 +106,11 @@ export default function HomeScreen() {
               onPress: async () => {
                 const sent = await SMSFallbackService.sendOfflineSMS({
                   contacts,
-                  latitude: location.latitude,
-                  longitude: location.longitude,
+                  latitude: lat,
+                  longitude: lng,
                   triggerSource: source,
                 });
-                if (sent) Alert.alert('SMS Loaded', 'Native carrier message composer loaded.');
+                if (sent) showToast('SMS Composer Loaded.', 'success');
               }
             },
             {
@@ -72,11 +118,11 @@ export default function HomeScreen() {
               onPress: async () => {
                 const sent = await SMSFallbackService.sendOfflineWhatsApp({
                   contacts,
-                  latitude: location.latitude,
-                  longitude: location.longitude,
+                  latitude: lat,
+                  longitude: lng,
                   triggerSource: source,
                 });
-                if (sent) Alert.alert('WhatsApp Loaded', 'WhatsApp messaging composer loaded.');
+                if (sent) showToast('WhatsApp Composer Loaded.', 'success');
               }
             },
             {
@@ -91,15 +137,15 @@ export default function HomeScreen() {
       }
 
       // Online API trigger
-      const data = await apiService.triggerSOS(location.latitude, location.longitude, source);
+      const data = await apiService.triggerSOS(lat, lng, source);
       setActiveSOSInfo(data);
-      Alert.alert(
+      showAlert(
         'SOS Alerts Broadcasted',
-        `Signals successfully routed!\n\n• Termii SMS: Delivered to contacts\n• WhatsApp Fallback: Broadcasted\n• Status: Active Tracking Mode`
+        `Signals successfully routed!\n\nDelivered to contacts via SMS\n Broadcasted via WhatsApp\nActive Tracking Mode`
       );
     } catch (err) {
       // API call failed, automatically fallback to offline chooser
-      Alert.alert(
+      showAlert(
         'Server Connection Failed',
         'Could not reach the safety server. Choose an offline fallback route:',
         [
@@ -108,10 +154,11 @@ export default function HomeScreen() {
             onPress: async () => {
               const sent = await SMSFallbackService.sendOfflineSMS({
                 contacts,
-                latitude: location.latitude,
-                longitude: location.longitude,
+                latitude: lat,
+                longitude: lng,
                 triggerSource: `${source} (API Failure Fallback)`,
               });
+              if (sent) showToast('SMS Composer Loaded.', 'success');
             }
           },
           {
@@ -119,10 +166,11 @@ export default function HomeScreen() {
             onPress: async () => {
               const sent = await SMSFallbackService.sendOfflineWhatsApp({
                 contacts,
-                latitude: location.latitude,
-                longitude: location.longitude,
+                latitude: lat,
+                longitude: lng,
                 triggerSource: `${source} (API Failure Fallback)`,
               });
+              if (sent) showToast('WhatsApp Composer Loaded.', 'success');
             }
           },
           {
@@ -140,7 +188,7 @@ export default function HomeScreen() {
   const handleResolveSOS = () => {
     setSosActive(false);
     setActiveSOSInfo(null);
-    Alert.alert('SOS Resolved', 'Emergency alert has been cancelled and location sharing ended.');
+    showToast('SOS Resolved: Location sharing ended.', 'info');
   };
 
   return (
@@ -162,75 +210,66 @@ export default function HomeScreen() {
                 pressed && { opacity: 0.7 }
               ]}
             >
-              {Platform.OS === 'ios' ? (
-                <SymbolView
-                  name="gearshape.fill"
-                  tintColor={theme.primary}
-                  size={24}
-                />
-              ) : (
-                <Text style={{ fontSize: 24, color: theme.primary }}>⚙️</Text>
-              )}
+              <Ionicons name="settings" size={24} color={theme.primary} />
             </Pressable>
           </View>
 
-          {/* Proactive Risk Warning Banner */}
           {riskWarning && (
             <ThemedView type="backgroundElement" style={styles.warningBanner}>
-              <ThemedText style={styles.warningTitle}>🚨 SECURITY RISK WARNING</ThemedText>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <Ionicons name="warning" size={16} color="#EF4444" />
+                <ThemedText style={styles.warningTitle}>SECURITY RISK WARNING</ThemedText>
+              </View>
               <ThemedText style={[styles.warningName, { color: theme.text }]}>{riskWarning.name}</ThemedText>
               <ThemedText type="small" themeColor="textSecondary" style={styles.warningAdvice}>{riskWarning.advice}</ThemedText>
               <ThemedText type="small" themeColor="textSecondary" style={styles.warningDistance}>Distance: {riskWarning.distance_km}km away</ThemedText>
             </ThemedView>
           )}
 
-          {/* Network & Safety Status Card */}
           <ThemedView type="backgroundElement" style={styles.statusCard}>
             <View style={styles.statusRow}>
               <ThemedText type="small">Network Mode:</ThemedText>
               <View style={styles.badgeRow}>
-                <Pressable
-                  onPress={() => setNetworkOnline(!networkOnline)}
+                <View
                   style={[
                     styles.statusBadge,
                     { backgroundColor: networkOnline ? '#10B981' : '#F59E0B' },
                   ]}
                 >
                   <ThemedText style={styles.badgeText}>
-                    {networkOnline ? 'Online ' : 'Offline'}
+                    {networkOnline ? 'Online' : 'Offline'}
                   </ThemedText>
-                </Pressable>
+                </View>
               </View>
-            </View>
-
-            <View style={styles.statusRow}>
-              <ThemedText type="small">GPS Coordinates:</ThemedText>
-              <ThemedText themeColor="textSecondary" style={styles.coordinatesText}>
-                {location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}
-              </ThemedText>
-            </View>
-
-            <View style={styles.statusRow}>
-              <ThemedText type="small">Sync Latency:</ThemedText>
-              <ThemedText themeColor="textSecondary" style={styles.coordinatesText}>
-                {networkLatency > 0 ? `${networkLatency}ms` : 'Not synced yet'}
-              </ThemedText>
             </View>
 
             {batteryLevel !== null && (
               <View style={styles.statusRow}>
                 <ThemedText type="small">Device Battery:</ThemedText>
-                <ThemedText themeColor="textSecondary" style={styles.coordinatesText}>
-                  {(batteryLevel * 100).toFixed(0)}% {isPowerSavingMode && batteryLevel <= 0.20 ? '🔋 Eco Active' : ''}
-                </ThemedText>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <ThemedText themeColor="textSecondary" style={styles.coordinatesText}>
+                    {(batteryLevel * 100).toFixed(0)}%
+                  </ThemedText>
+                  {isPowerSavingMode && batteryLevel <= 0.20 && (
+                    <>
+                      <Ionicons name="battery-dead" size={14} color="#EF4444" />
+                      <ThemedText style={{ color: '#EF4444', fontSize: 12, fontWeight: 'bold' }}>
+                        Power Saving Active
+                      </ThemedText>
+                    </>
+                  )}
+                </View>
               </View>
             )}
 
             {isPowerSavingMode && (
               <View style={[styles.statusRow, { marginTop: 4 }]}>
-                <ThemedText type="small" style={{ color: '#F59E0B', fontWeight: 'bold' }}>
-                  ⚠️ Eco Mode Activated:
-                </ThemedText>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Ionicons name="warning" size={14} color="#F59E0B" />
+                  <ThemedText type="small" style={{ color: '#F59E0B', fontWeight: 'bold' }}>
+                    Power Saving Mode Activated:
+                  </ThemedText>
+                </View>
                 <ThemedText style={{ color: '#F59E0B', fontSize: 12, fontWeight: 'bold' }}>
                   GPS updates scaled to 60s
                 </ThemedText>
@@ -242,7 +281,10 @@ export default function HomeScreen() {
           <View style={styles.sosContainer}>
             {sosActive ? (
               <View style={styles.activeAlertBox}>
-                <ThemedText style={styles.activeAlertTitle}>🚨 SOS BROADCAST ACTIVE</ThemedText>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                  <Ionicons name="alert-circle" size={20} color="#EF4444" />
+                  <ThemedText style={[styles.activeAlertTitle, { marginBottom: 0 }]}>SOS BROADCAST ACTIVE</ThemedText>
+                </View>
                 <ThemedText style={styles.activeAlertSubtitle}>
                   Location update stream is broadcasting to your trusted circle.
                 </ThemedText>
@@ -272,9 +314,12 @@ export default function HomeScreen() {
             <ThemedText style={styles.sectionTitle}>Hands-free Voice Trigger</ThemedText>
             <View style={styles.voiceRow}>
               <View style={styles.voiceTextContainer}>
-                <ThemedText type="small" themeColor="textSecondary" style={styles.voiceStatusText}>
-                  {isListening ? '🎙️ Listening for wake phrase "Help Me"' : 'Voice activation off'}
-                </ThemedText>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  {isListening && <Ionicons name="mic" size={14} color="#EF4444" />}
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.voiceStatusText}>
+                    {isListening ? 'Listening for wake phrase "Help Me"' : 'Voice activation off'}
+                  </ThemedText>
+                </View>
               </View>
               <Pressable
                 style={[

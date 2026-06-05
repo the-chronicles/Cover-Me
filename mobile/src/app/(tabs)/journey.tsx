@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, TextInput, Pressable, ScrollView, Alert, Image, Modal, ActivityIndicator, Platform } from 'react-native';
+import { StyleSheet, View, TextInput, Pressable, ScrollView, Image, Modal, ActivityIndicator, Platform } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useAlert } from '@/context/AlertToastContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { ThemedText } from '@/components/themed-text';
@@ -12,6 +14,7 @@ import { useTheme } from '@/hooks/use-theme';
 
 export default function JourneyScreen() {
   const theme = useTheme();
+  const { showAlert, showToast } = useAlert();
   const [startLoc, setStartLoc] = useState('');
   const [destination, setDestination] = useState('');
   const [contact, setContact] = useState('');
@@ -47,14 +50,14 @@ export default function JourneyScreen() {
 
   const handleStartJourney = async () => {
     if (!startLoc || !destination || !contact || !duration) {
-      Alert.alert('Incomplete Form', 'Please provide start location, destination, emergency contact, and duration.');
+      showToast('Please provide start location, destination, emergency contact, and duration.', 'error');
       return;
     }
 
     try {
       const minutes = parseInt(duration);
       if (isNaN(minutes)) {
-        Alert.alert('Invalid Duration', 'Duration must be a number representing minutes.');
+        showToast('Duration must be a number representing minutes.', 'error');
         return;
       }
 
@@ -82,12 +85,12 @@ export default function JourneyScreen() {
         }
       }
 
-      Alert.alert(
+      showAlert(
         'Follow Me Journey Started',
         `Continuous location updates are now sharing with ${contact} for your trip from ${startLoc} to ${destination}.`
       );
     } catch (err) {
-      Alert.alert('Error Starting Journey', 'Could not sync with the API server. Please check your network.');
+      showToast('Could not sync with the API server. Please check your network.', 'error');
     }
   };
 
@@ -99,7 +102,7 @@ export default function JourneyScreen() {
     setDuration('');
     setLicensePlate('');
     setPlatePhoto(null);
-    Alert.alert('Journey Ended', 'Location updates for this trip have ceased.');
+    showToast('Journey Ended: Location sharing ceased.', 'info');
   };
 
   const handleCaptureLicensePlate = async () => {
@@ -108,14 +111,14 @@ export default function JourneyScreen() {
     const libraryPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (cameraPermission.status !== 'granted' && libraryPermission.status !== 'granted') {
-      Alert.alert(
+      showAlert(
         'Permission Denied',
         'CoverMe needs access to your camera or gallery to verify vehicle license plates.'
       );
       return;
     }
 
-    Alert.alert(
+    showAlert(
       'Verify License Plate',
       'Take a photo of the vehicle plate or choose an existing photo from your library:',
       [
@@ -220,13 +223,21 @@ export default function JourneyScreen() {
               {isPowerSavingMode && (
                 <View style={styles.journeyInfoRow}>
                   <ThemedText type="small" style={{ color: '#F59E0B' }}>Tracking Profile:</ThemedText>
-                  <ThemedText style={{ color: '#F59E0B', fontWeight: 'bold', fontSize: 12 }}>🔋 ECO Mode Active (60s updates)</ThemedText>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Ionicons name="battery-dead" size={14} color="#F59E0B" />
+                    <ThemedText style={{ color: '#F59E0B', fontWeight: 'bold', fontSize: 12 }}>
+                      Power Saving Mode Active (60s updates)
+                    </ThemedText>
+                  </View>
                 </View>
               )}
 
               {riskWarning && (
                 <View style={styles.journeyWarningBox}>
-                  <ThemedText style={styles.journeyWarningTitle}>🚨 SECURITY RISK ZONE</ThemedText>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <Ionicons name="warning" size={16} color="#EF4444" />
+                    <ThemedText style={[styles.journeyWarningTitle, { marginBottom: 0 }]}>SECURITY RISK ZONE</ThemedText>
+                  </View>
                   <ThemedText style={[styles.journeyWarningName, { color: theme.text }]}>{riskWarning.name}</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary" style={styles.journeyWarningAdvice}>{riskWarning.advice}</ThemedText>
                 </View>
@@ -265,7 +276,10 @@ export default function JourneyScreen() {
                 </MapView>
               ) : (
                 <View style={styles.webMapPlaceholder}>
-                  <ThemedText style={styles.placeholderText}>🗺️ Live Location Tracking Map</ThemedText>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                    <Ionicons name="map" size={20} color={theme.textSecondary} />
+                    <ThemedText style={styles.placeholderText}>Live Location Tracking Map</ThemedText>
+                  </View>
                   <ThemedText type="small" style={styles.placeholderSubtext}>
                     Map rendering is optimized for native iOS/Android devices. Tracing {routeCoordinates.length} path breadcrumbs.
                   </ThemedText>

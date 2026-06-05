@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
+    "name": "CoverMe",
+    "slug": "coverme",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mobile",
+    "scheme": "coverme",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",

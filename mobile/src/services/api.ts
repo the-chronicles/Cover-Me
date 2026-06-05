@@ -5,8 +5,25 @@ import { authStorage } from './auth';
 // If running on a physical iPhone/Android device via Expo Go, replace 'localhost'
 // with your computer's local IP address (e.g., '192.168.1.50') and make sure both
 // devices are connected to the same Wi-Fi network.
-const LOCALHOST = Platform.OS === 'web' ? 'localhost' : '192.168.171.78';
+const LOCALHOST = Platform.OS === 'web' ? 'localhost' : '192.168.43.78';
 export const API_BASE_URL = `http://${LOCALHOST}:8000`;
+
+type UnauthorizedCallback = () => void;
+let unauthorizedCallback: UnauthorizedCallback | null = null;
+
+export function registerUnauthorizedCallback(cb: UnauthorizedCallback) {
+  unauthorizedCallback = cb;
+}
+
+export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const response = await fetch(url, options);
+  if (response.status === 401) {
+    if (unauthorizedCallback) {
+      unauthorizedCallback();
+    }
+  }
+  return response;
+}
 
 function handleRequestError(endpoint: string, error: any) {
   console.warn(`[API Connection Error] Failed to call: ${endpoint}`);
@@ -54,21 +71,21 @@ export interface Journey {
 async function getAuthHeaders(contentType: string | null = 'application/json'): Promise<HeadersInit> {
   const token = await authStorage.getToken();
   const headers: Record<string, string> = {};
-  
+
   if (contentType) {
     headers['Content-Type'] = contentType;
   }
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  
+
   return headers;
 }
 
 export const apiService = {
   async addContact(data: { name: string; phone_number: string; relation?: string }): Promise<any> {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE_URL}/contacts/add`, {
+    const response = await apiFetch(`${API_BASE_URL}/contacts/add`, {
       method: 'POST',
       headers,
       body: JSON.stringify(data),
@@ -81,7 +98,7 @@ export const apiService = {
 
   async getContacts(): Promise<any[]> {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE_URL}/contacts/list`, {
+    const response = await apiFetch(`${API_BASE_URL}/contacts/list`, {
       method: 'GET',
       headers,
     });
@@ -94,7 +111,7 @@ export const apiService = {
   async triggerSOS(lat: number | null, lng: number | null, source: string = 'button'): Promise<SOSResponse> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE_URL}/sos/trigger`, {
+      const response = await apiFetch(`${API_BASE_URL}/sos/trigger`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -119,12 +136,12 @@ export const apiService = {
       const params = new URLSearchParams();
       if (state) params.append('state', state);
       if (lga) params.append('lga', lga);
-      
+
       if (params.toString()) {
         url += `?${params.toString()}`;
       }
 
-      const response = await fetch(url);
+      const response = await apiFetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch command lines');
       }
@@ -143,7 +160,7 @@ export const apiService = {
     license_plate?: string;
   }): Promise<Journey> {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE_URL}/journey/start`, {
+    const response = await apiFetch(`${API_BASE_URL}/journey/start`, {
       method: 'POST',
       headers,
       body: JSON.stringify(data),
@@ -159,11 +176,11 @@ export const apiService = {
       const headers = await getAuthHeaders(null); // Let fetch set boundary for multipart/form-data
       const formData = new FormData();
       formData.append('journey_id', String(journeyId));
-      
+
       const filename = photoUri.split('/').pop() || 'photo.jpg';
       const match = /\.(\w+)$/.exec(filename);
       const type = match ? `image/${match[1]}` : `image/jpeg`;
-      
+
       formData.append('photo', {
         uri: photoUri,
         name: filename,
@@ -174,7 +191,7 @@ export const apiService = {
         formData.append('license_plate', licensePlateText);
       }
 
-      const response = await fetch(`${API_BASE_URL}/journey/vehicle-photo?journey_id=${journeyId}`, {
+      const response = await apiFetch(`${API_BASE_URL}/journey/vehicle-photo?journey_id=${journeyId}`, {
         method: 'POST',
         headers,
         body: formData,
@@ -192,13 +209,25 @@ export const apiService = {
 
   async updateProfile(data: { full_name?: string; phone_number?: string }): Promise<any> {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE_URL}/user/update`, {
+    const response = await apiFetch(`${API_BASE_URL}/user/update`, {
       method: 'POST',
       headers,
       body: JSON.stringify(data),
     });
     if (!response.ok) {
       throw new Error('Failed to update profile');
+    }
+    return await response.json();
+  },
+
+  async deleteAccount(): Promise<any> {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_BASE_URL}/user/delete`, {
+      method: 'POST',
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error('Failed to delete account');
     }
     return await response.json();
   }

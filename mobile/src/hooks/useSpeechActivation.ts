@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { Alert, Platform } from 'react-native';
+import { Platform } from 'react-native';
+import { useAlert } from '@/context/AlertToastContext';
 
 export interface UseSpeechActivationProps {
   onWakeWordDetected: () => void;
 }
 
 export function useSpeechActivation({ onWakeWordDetected }: UseSpeechActivationProps) {
+  const { showAlert } = useAlert();
   const [isListening, setIsListening] = useState(false);
   const [recognitionSupported, setRecognitionSupported] = useState(false);
   const recognitionRef = useRef<any>(null);
@@ -38,7 +40,7 @@ export function useSpeechActivation({ onWakeWordDetected }: UseSpeechActivationP
           rec.stop();
           setIsListening(false);
           
-          Alert.alert(
+          showAlert(
             'Voice SOS Activated',
             `Speech scanner matching keyword detected. Dispatching emergency broadcasts!`,
             [
@@ -52,7 +54,7 @@ export function useSpeechActivation({ onWakeWordDetected }: UseSpeechActivationP
       rec.onerror = (event: any) => {
         console.warn('[Speech Recognition Error]:', event.error);
         if (event.error === 'not-allowed') {
-          Alert.alert('Microphone Blocked', 'Voice recognition requires microphone permissions.');
+          showAlert('Microphone Blocked', 'Voice recognition requires microphone permissions.');
           setIsListening(false);
         }
       };
@@ -77,7 +79,7 @@ export function useSpeechActivation({ onWakeWordDetected }: UseSpeechActivationP
       // Fallback for native wrapper simulators without web speech bindings
       setIsListening(true);
       console.log('[Speech Trigger Simulator] Listening...');
-      Alert.alert(
+      showAlert(
         'Speech Recognition Active',
         'Speak close to the mic. (Simulating: matching "help me" in 10 seconds for demo...)',
         [{ text: 'Cancel', onPress: () => stopListening() }]

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, TextInput, Pressable, Alert, FlatList, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, TextInput, Pressable, FlatList, ActivityIndicator } from 'react-native';
+import { useAlert } from '@/context/AlertToastContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { ThemedText } from '@/components/themed-text';
@@ -16,6 +17,7 @@ interface Contact {
 
 export default function ContactsScreen() {
   const theme = useTheme();
+  const { showAlert, showToast } = useAlert();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [relation, setRelation] = useState('');
@@ -48,13 +50,13 @@ export default function ContactsScreen() {
 
   const handleAddContact = async () => {
     if (!name || !phone) {
-      Alert.alert('Incomplete Form', 'Please provide a name and phone number.');
+      showToast('Please provide a name and phone number.', 'error');
       return;
     }
 
     const cleanPhone = phone.trim();
     if (!/^\+?234\d{10}$|^0[789][01]\d{8}$/.test(cleanPhone)) {
-      Alert.alert('Invalid Phone Number', 'Please input a valid Nigerian phone number.');
+      showToast('Please input a valid Nigerian phone number.', 'error');
       return;
     }
 
@@ -77,16 +79,16 @@ export default function ContactsScreen() {
       setName('');
       setPhone('');
       setRelation('');
-      Alert.alert('Contact Added', `${name} has been added to your Trusted Circle safety list.`);
+      showToast(`${name} has been added to your Trusted Circle safety list.`, 'success');
     } catch (err) {
-      Alert.alert('Error Saving', 'Could not sync contact with backend. Check connection details and try again.');
+      showToast('Could not sync contact with backend. Check connection details and try again.', 'error');
     } finally {
       setSubmitLoading(false);
     }
   };
 
   const handleRemoveContact = (id: string, name: string) => {
-    Alert.alert(
+    showAlert(
       'Remove Contact',
       `Are you sure you want to remove ${name} from your safety circle?`,
       [

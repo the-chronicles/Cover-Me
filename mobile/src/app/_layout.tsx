@@ -6,14 +6,30 @@ import { AuthProvider, useAuth } from '@/hooks/useAuth';
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import LoginScreen from './login';
 import { useVolumeTrigger } from '@/hooks/useVolumeTrigger';
+import { AlertToastProvider, useAlert } from '@/context/AlertToastContext';
+import { registerUnauthorizedCallback } from '@/services/api';
+
+function VolumeTriggerWrapper() {
+  useVolumeTrigger();
+  return null;
+}
 
 function AppContent() {
-  const { token, isLoading, themePreference } = useAuth();
+  const { token, isLoading, themePreference, signOut } = useAuth();
+  const { showAlert } = useAlert();
   const segments = useSegments();
   const scheme = useColorScheme();
 
-  // Register hardware volume panic trigger globally
-  useVolumeTrigger();
+  React.useEffect(() => {
+    registerUnauthorizedCallback(async () => {
+      await signOut();
+      showAlert(
+        'Session Expired',
+        'Your session has expired. Please log in again to continue.',
+        [{ text: 'OK' }]
+      );
+    });
+  }, [signOut, showAlert]);
 
   const activeTheme = themePreference === 'system'
     ? (scheme === 'unspecified' ? 'light' : scheme)
@@ -42,6 +58,7 @@ function AppContent() {
 
   return (
     <ThemeProvider value={activeTheme === 'dark' ? DarkTheme : DefaultTheme}>
+      <VolumeTriggerWrapper />
       <AnimatedSplashOverlay />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
@@ -54,7 +71,10 @@ function AppContent() {
 export default function TabLayout() {
   return (
     <AuthProvider>
-      <AppContent />
+      <AlertToastProvider>
+        <AppContent />
+      </AlertToastProvider>
     </AuthProvider>
   );
 }
+

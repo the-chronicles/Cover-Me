@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, TextInput, Pressable, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { StyleSheet, View, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Image } from 'react-native';
+import { useAlert } from '@/context/AlertToastContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, MaxContentWidth } from '@/constants/theme';
 import { ThemedText } from '@/components/themed-text';
@@ -10,6 +11,11 @@ import { useTheme } from '@/hooks/use-theme';
 
 export default function RegisterScreen() {
   const theme = useTheme();
+  const isDark = theme.background === '#0F172A';
+  const logoSource = isDark
+    ? require('../../assets/images/CoverMe Logo slimW.png')
+    : require('../../assets/images/CoverMe Logo Dark.png');
+
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -17,33 +23,34 @@ export default function RegisterScreen() {
   const [loading, setLoading] = useState(false);
   const { signUp } = useAuth();
   const router = useRouter();
+  const { showToast } = useAlert();
 
   const handleRegister = async () => {
     if (!fullName || !email || !phone || !password) {
-      Alert.alert('Incomplete Form', 'Please fill in all details.');
+      showToast('Please fill in all details.', 'error');
       return;
     }
 
     // Basic email check
     if (!email.includes('@')) {
-      Alert.alert('Invalid Email', 'Please enter a valid email address.');
+      showToast('Please enter a valid email address.', 'error');
       return;
     }
 
     // Basic Nigerian phone check
     const cleanPhone = phone.trim();
     if (!/^\+?234\d{10}$|^0[789][01]\d{8}$/.test(cleanPhone)) {
-      Alert.alert('Invalid Phone Number', 'Please input a valid phone number (e.g. +2348033011234).');
+      showToast('Please input a valid Nigerian phone number (e.g. +2348033011234).', 'error');
       return;
     }
 
     setLoading(true);
     try {
       await signUp(fullName.trim(), email.trim().toLowerCase(), cleanPhone, password);
-      Alert.alert('Registration Successful', 'Welcome to CoverMe!');
+      showToast('Registration Successful! Welcome to CoverMe!', 'success');
       router.replace('/');
     } catch (error: any) {
-      Alert.alert('Registration Failed', error.message || 'Check connection details and try again.');
+      showToast(error.message || 'Check connection details and try again.', 'error');
     } finally {
       setLoading(false);
     }
@@ -58,8 +65,7 @@ export default function RegisterScreen() {
         >
           <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
             <View style={styles.branding}>
-              <ThemedText style={styles.brandTitle}>CoverMe</ThemedText>
-              <ThemedText themeColor="textSecondary" style={styles.brandSlogan}>never walk alone.</ThemedText>
+              <Image source={logoSource} style={styles.brandLogo} resizeMode="contain" />
             </View>
 
             <ThemedView type="backgroundElement" style={styles.formCard}>
@@ -165,15 +171,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: Spacing.four,
   },
-  brandTitle: {
-    fontSize: 40,
-    fontWeight: 'bold',
-    color: '#2563EB',
-  },
-  brandSlogan: {
-    fontSize: 16,
-    fontStyle: 'italic',
-    marginTop: Spacing.half,
+  brandLogo: {
+    width: 200,
+    height: 200,
   },
   formCard: {
     padding: Spacing.four,
