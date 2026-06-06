@@ -10,8 +10,8 @@ from jose import jwt
 # --- JWT Configuration ---
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "coverme-super-safety-secret-key-1092837")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30  # Short-lived access tokens
-REFRESH_TOKEN_EXPIRE_DAYS = 30    # Long-lived refresh tokens
+ACCESS_TOKEN_EXPIRE_MINUTES = 7200  # 5 days (5 * 24 * 60) — session persists for 5 days of inactivity
+REFRESH_TOKEN_EXPIRE_DAYS = 30      # Long-lived refresh tokens
 
 # --- Encryption Configuration ---
 # Derive a valid Fernet key (32 bytes urlsafe base64) from JWT_SECRET_KEY or LOCATION_ENCRYPTION_KEY

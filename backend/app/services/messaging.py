@@ -9,6 +9,7 @@ class MessagingService:
     
     self.meta_wa_token = os.getenv("META_WA_ACCESS_TOKEN", "YOUR_META_WA_ACCESS_TOKEN")
     self.meta_wa_phone_id = os.getenv("META_WA_PHONE_NUMBER_ID", "YOUR_META_WA_PHONE_NUMBER_ID")
+    self.meta_wa_lang = os.getenv("META_WA_TEMPLATE_LANGUAGE", "en_US")
 
   async def send_sms_via_termii(self, recipient: str, message: str) -> Dict[str, Any]:
     # Clean phone formatting (remove + prefix for Termii, e.g. +234... to 234...)
@@ -139,7 +140,7 @@ class MessagingService:
       "template": {
         "name": template_name,
         "language": {
-          "code": "en_US"
+          "code": self.meta_wa_lang
         },
         "components": [
           {
@@ -175,8 +176,8 @@ class MessagingService:
                       f"AND the template '{template_name}' failed to deliver. Make sure the template '{template_name}' is "
                       f"active and approved under WhatsApp Manager in your Meta Business Suite, and that the parameter count matches.")
             elif err_code == 132001:
-                print(f"[Meta WhatsApp Hint] ERROR 132001: Template '{template_name}' does not exist in en_US locale. "
-                      f"You MUST create and register this template ('{template_name}') in your WhatsApp Manager dashboard before sending it.")
+                print(f"[Meta WhatsApp Hint] ERROR 132001: Template '{template_name}' does not exist in language '{self.meta_wa_lang}'. "
+                      f"You MUST create and register this template ('{template_name}') in your WhatsApp Manager dashboard under the same language locale before sending it.")
 
             # Fallback 1: Try sending the actual message as a free-text message (works if contact interacted in 24h)
             if fallback_text:
@@ -279,3 +280,34 @@ class MessagingService:
         "whatsapp_status": wa_res["status"]
       })
     return results
+
+  async def send_push_via_expo(self, push_token: str, title: str, body: str, data: dict = None) -> Dict[str, Any]:
+    if not push_token or not push_token.startswith("ExponentPushToken"):
+      print(f"[Expo Push Warning] Invalid or missing push token format: {push_token}")
+      return {"status": "failed", "error": "Invalid Expo push token format."}
+    
+    url = "https://exp.host/--/api/v2/push/send"
+    headers = {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "Accept-encoding": "gzip, deflate"
+    }
+    payload = {
+      "to": push_token,
+      "title": title,
+      "body": body,
+      "sound": "default"
+    }
+    if data:
+      payload["data"] = data
+
+    try:
+      async with httpx.AsyncClient() as client:
+        response = await client.post(url, json=payload, headers=headers, timeout=10.0)
+        response_data = response.json()
+        print(f"[Expo Push Response] Code {response.status_code}: {response_data}")
+        return {"status": "success", "data": response_data}
+    except Exception as e:
+      print(f"[Expo Push Error] Failed to connect to Expo Push API: {e}")
+      return {"status": "failed", "error": str(e)}
+

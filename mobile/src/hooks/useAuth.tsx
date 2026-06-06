@@ -75,6 +75,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       await authStorage.saveToken(data.access_token);
       await authStorage.saveUserData(data.user);
+      if (data.refresh_token) {
+        await authStorage.saveRefreshToken(data.refresh_token);
+      }
     } catch (error) {
       console.error('Login action error:', error);
       throw error;

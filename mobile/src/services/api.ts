@@ -15,13 +15,68 @@ export function registerUnauthorizedCallback(cb: UnauthorizedCallback) {
   unauthorizedCallback = cb;
 }
 
+// Attempt a silent token refresh. Returns the new access token or null on failure.
+async function tryRefreshToken(): Promise<string | null> {
+  try {
+    const refreshToken = await authStorage.getRefreshToken();
+    if (!refreshToken) return null;
+
+    const response = await fetch(`${API_BASE_URL}/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (data.access_token) {
+      await authStorage.saveToken(data.access_token);
+      if (data.refresh_token) {
+        await authStorage.saveRefreshToken(data.refresh_token);
+      }
+      console.log('[Auth] Token silently refreshed.');
+      return data.access_token;
+    }
+    return null;
+  } catch (err) {
+    console.warn('[Auth] Silent token refresh failed:', err);
+    return null;
+  }
+}
+
+let _isRefreshing = false;
 export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const response = await fetch(url, options);
+
   if (response.status === 401) {
+    // Avoid re-entrant refresh loops (e.g., the /refresh call itself returning 401)
+    if (!_isRefreshing && !url.includes('/refresh') && !url.includes('/login')) {
+      _isRefreshing = true;
+      try {
+        const newToken = await tryRefreshToken();
+        if (newToken) {
+          // Retry the original request with the new token
+          const retryOptions: RequestInit = {
+            ...options,
+            headers: {
+              ...(options.headers as Record<string, string> || {}),
+              'Authorization': `Bearer ${newToken}`,
+            },
+          };
+          _isRefreshing = false;
+          return await fetch(url, retryOptions);
+        }
+      } finally {
+        _isRefreshing = false;
+      }
+    }
+    // Refresh failed or not applicable — call the force-logout callback
     if (unauthorizedCallback) {
       unauthorizedCallback();
     }
   }
+
   return response;
 }
 
@@ -63,8 +118,18 @@ export interface Journey {
   emergency_contact_phone: string;
   duration_minutes: number;
   license_plate?: string;
+  watcher_type?: string;
+  watcher_id?: number;
   is_active: boolean;
   started_at: string;
+}
+
+export interface SOSActiveInfo {
+  id: number;
+  user_id: number;
+  status: string;
+  trigger_source: string;
+  triggered_at: string;
 }
 
 // Helper to construct authenticated headers
@@ -91,7 +156,8 @@ export const apiService = {
       body: JSON.stringify(data),
     });
     if (!response.ok) {
-      throw new Error('Failed to add contact');
+      const err = await response.json();
+      throw new Error(err.detail || 'Failed to add contact');
     }
     return await response.json();
   },
@@ -104,6 +170,32 @@ export const apiService = {
     });
     if (!response.ok) {
       throw new Error('Failed to fetch contacts');
+    }
+    return await response.json();
+  },
+
+  async updateContact(contactId: number, data: { name: string; phone_number: string; relation?: string }): Promise<any> {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_BASE_URL}/contacts/${contactId}/update`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.detail || 'Failed to update contact');
+    }
+    return await response.json();
+  },
+
+  async deleteContact(contactId: number): Promise<any> {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_BASE_URL}/contacts/${contactId}`, {
+      method: 'DELETE',
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error('Failed to delete contact');
     }
     return await response.json();
   },
@@ -155,9 +247,11 @@ export const apiService = {
   async startJourney(data: {
     start_location: string;
     destination: string;
-    emergency_contact_phone: string;
+    emergency_contact_phone?: string;
     duration_minutes: number;
     license_plate?: string;
+    watcher_type?: 'member' | 'circle';
+    watcher_id?: number;
   }): Promise<Journey> {
     const headers = await getAuthHeaders();
     const response = await apiFetch(`${API_BASE_URL}/journey/start`, {
@@ -230,5 +324,194 @@ export const apiService = {
       throw new Error('Failed to delete account');
     }
     return await response.json();
-  }
+  },
+
+  async createCircle(data: { name: string; category: string; role: string }): Promise<any> {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_BASE_URL}/circles/create`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.detail || 'Failed to create circle');
+    }
+    return await response.json();
+  },
+
+  async joinCircle(data: { invite_code: string; role: string }): Promise<any> {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_BASE_URL}/circles/join`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.detail || 'Failed to join circle');
+    }
+    return await response.json();
+  },
+
+  async getMyCircles(): Promise<any[]> {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_BASE_URL}/circles/my`, {
+      method: 'GET',
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error('Failed to fetch circles');
+    }
+    return await response.json();
+  },
+
+  async leaveCircle(circleId: number): Promise<any> {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_BASE_URL}/circles/${circleId}/leave`, {
+      method: 'POST',
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error('Failed to leave circle');
+    }
+    return await response.json();
+  },
+
+  async getNotifications(): Promise<any[]> {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_BASE_URL}/notifications`, {
+      method: 'GET',
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error('Failed to fetch notifications');
+    }
+    return await response.json();
+  },
+
+  async markNotificationRead(id: number): Promise<any> {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_BASE_URL}/notifications/${id}/read`, {
+      method: 'POST',
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error('Failed to mark notification as read');
+    }
+    return await response.json();
+  },
+
+  async markAllNotificationsRead(): Promise<any> {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_BASE_URL}/notifications/read-all`, {
+      method: 'POST',
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error('Failed to mark all notifications as read');
+    }
+    return await response.json();
+  },
+
+  async inviteToCircle(circleId: number, emailOrPhone: string, role: string = 'Member'): Promise<any> {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_BASE_URL}/circles/${circleId}/invite`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        recipient_email_or_phone: emailOrPhone,
+        role,
+      }),
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.detail || 'Failed to send invite');
+    }
+    return await response.json();
+  },
+
+  async getActiveWatchedJourneys(): Promise<any[]> {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_BASE_URL}/journey/active-watched`, {
+      method: 'GET',
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error('Failed to fetch active watched journeys');
+    }
+    return await response.json();
+  },
+
+  async registerPushToken(pushToken: string): Promise<any> {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_BASE_URL}/users/push-token`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ push_token: pushToken }),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to register push token');
+    }
+    return await response.json();
+  },
+
+  // --- Session State Recovery ---
+
+  async getActiveSOS(): Promise<SOSActiveInfo | null> {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await apiFetch(`${API_BASE_URL}/sos/active`, {
+        method: 'GET',
+        headers,
+      });
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data || null;
+    } catch (err) {
+      console.warn('[API] getActiveSOS failed:', err);
+      return null;
+    }
+  },
+
+  async resolveSOS(): Promise<any> {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_BASE_URL}/sos/resolve`, {
+      method: 'POST',
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error('Failed to resolve SOS');
+    }
+    return await response.json();
+  },
+
+  async getMyActiveJourney(): Promise<Journey | null> {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await apiFetch(`${API_BASE_URL}/journey/my-active`, {
+        method: 'GET',
+        headers,
+      });
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data || null;
+    } catch (err) {
+      console.warn('[API] getMyActiveJourney failed:', err);
+      return null;
+    }
+  },
+
+  async endJourney(): Promise<any> {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_BASE_URL}/journey/end`, {
+      method: 'POST',
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error('Failed to end journey');
+    }
+    return await response.json();
+  },
 };
+

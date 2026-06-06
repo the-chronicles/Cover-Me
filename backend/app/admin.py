@@ -301,6 +301,47 @@ class AdminNotificationAdmin(ModelView, model=models.AdminNotification):
     can_edit = True
 
 
+class CircleAdmin(ModelView, model=models.Circle):
+    name = "Circle"
+    name_plural = "Circles"
+    icon = "fa-solid fa-users-rectangle"
+
+    column_list = [
+        models.Circle.id,
+        models.Circle.name,
+        models.Circle.category,
+        models.Circle.invite_code,
+        models.Circle.created_at,
+    ]
+    column_searchable_list = [models.Circle.name, models.Circle.invite_code]
+    column_sortable_list = [models.Circle.id, models.Circle.created_at]
+    column_default_sort = (models.Circle.created_at, True)
+
+    can_create = True
+    can_delete = True
+    can_edit = True
+
+
+class CircleMemberAdmin(ModelView, model=models.CircleMember):
+    name = "Circle Member"
+    name_plural = "Circle Members"
+    icon = "fa-solid fa-user-tag"
+
+    column_list = [
+        models.CircleMember.id,
+        models.CircleMember.circle_id,
+        models.CircleMember.user_id,
+        models.CircleMember.role,
+        models.CircleMember.joined_at,
+    ]
+    column_sortable_list = [models.CircleMember.id, models.CircleMember.joined_at]
+    column_default_sort = (models.CircleMember.joined_at, True)
+
+    can_create = True
+    can_delete = True
+    can_edit = True
+
+
 # ─── Custom Admin with Dashboard Stats ────────────────────────────────────────
 
 import datetime as _dt
@@ -448,6 +489,28 @@ class CoverMeAdmin(Admin):
         )
 
 
+class NotificationAdmin(ModelView, model=models.Notification):
+    name = "Notification"
+    name_plural = "Notifications"
+    icon = "fa-solid fa-bell"
+
+    column_list = [
+        models.Notification.id,
+        models.Notification.user_id,
+        models.Notification.type,
+        models.Notification.title,
+        models.Notification.message,
+        models.Notification.read,
+        models.Notification.created_at,
+    ]
+    column_searchable_list = [models.Notification.title, models.Notification.message, models.Notification.type]
+    column_sortable_list = [models.Notification.id, models.Notification.created_at]
+
+    can_create = True
+    can_delete = True
+    can_edit = True
+
+
 # ─── Admin Setup Function ────────────────────────────────────────────────────
 
 def setup_admin(app):
@@ -480,6 +543,9 @@ def setup_admin(app):
     admin.add_view(EmergencyCommandLineAdmin)
     admin.add_view(RefreshTokenAdmin)
     admin.add_view(AdminNotificationAdmin)
+    admin.add_view(CircleAdmin)
+    admin.add_view(CircleMemberAdmin)
+    admin.add_view(NotificationAdmin)
 
     return admin
 

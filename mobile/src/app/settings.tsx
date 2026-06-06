@@ -297,7 +297,7 @@ export default function SettingsScreen() {
 
             <View style={styles.linkList}>
               <Pressable
-                onPress={() => handleOpenLink('https://coverme.ng/privacy')}
+                onPress={() => handleOpenLink('https://covermetech.site/privacy-policy.html')}
                 style={({ pressed }) => [
                   styles.linkRow,
                   pressed && { opacity: 0.7 }
@@ -308,7 +308,7 @@ export default function SettingsScreen() {
               </Pressable>
 
               <Pressable
-                onPress={() => handleOpenLink('https://coverme.ng/terms')}
+                onPress={() => handleOpenLink('http://covermetech.site/terms-of-use.html')}
                 style={({ pressed }) => [
                   styles.linkRow,
                   pressed && { opacity: 0.7 }
@@ -319,7 +319,7 @@ export default function SettingsScreen() {
               </Pressable>
 
               <Pressable
-                onPress={() => handleOpenLink('https://coverme.ng/support')}
+                onPress={() => handleOpenLink('http:mailto:support@covermetech.site')}
                 style={({ pressed }) => [
                   styles.linkRow,
                   pressed && { opacity: 0.7 }

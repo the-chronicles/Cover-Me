@@ -13,10 +13,16 @@ class User(Base):
     phone_number = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
+    last_lat = Column(Float, nullable=True)
+    last_lng = Column(Float, nullable=True)
+    location_updated_at = Column(DateTime, nullable=True)
+    push_token = Column(String, nullable=True)
+
     contacts = relationship("TrustedContact", back_populates="owner", cascade="all, delete-orphan")
     journeys = relationship("Journey", back_populates="user", cascade="all, delete-orphan")
     sos_alerts = relationship("SOSAlert", back_populates="user", cascade="all, delete-orphan")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
+    circle_memberships = relationship("CircleMember", back_populates="user", cascade="all, delete-orphan")
 
 
 class TrustedContact(Base):
@@ -38,10 +44,12 @@ class Journey(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     start_location = Column(String, nullable=False)
     destination = Column(String, nullable=False)
-    emergency_contact_phone = Column(String, nullable=False)
+    emergency_contact_phone = Column(String, nullable=True)
     duration_minutes = Column(Integer, nullable=False)
     license_plate = Column(String, nullable=True)
     license_plate_photo_url = Column(String, nullable=True)
+    watcher_type = Column(String, nullable=True) # member or circle
+    watcher_id = Column(Integer, nullable=True)
     is_active = Column(Boolean, default=True)
     started_at = Column(DateTime, default=datetime.datetime.utcnow)
 
@@ -110,3 +118,42 @@ class AdminNotification(Base):
     message = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     read = Column(Boolean, default=False)
+
+
+class Circle(Base):
+    __tablename__ = "circles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    category = Column(String, nullable=False)
+    invite_code = Column(String, unique=True, index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    members = relationship("CircleMember", back_populates="circle", cascade="all, delete-orphan")
+
+
+class CircleMember(Base):
+    __tablename__ = "circle_members"
+
+    id = Column(Integer, primary_key=True, index=True)
+    circle_id = Column(Integer, ForeignKey("circles.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role = Column(String, nullable=False)
+    joined_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    circle = relationship("Circle", back_populates="members")
+    user = relationship("User", back_populates="circle_memberships")
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    type = Column(String, nullable=False) # circle_join, sos_alert, journey_start, circle_invite
+    title = Column(String, nullable=False)
+    message = Column(String, nullable=False)
+    read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    user = relationship("User")

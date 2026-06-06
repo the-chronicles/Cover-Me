@@ -2,6 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 const TOKEN_KEY = 'coverme_user_token';
+const REFRESH_TOKEN_KEY = 'coverme_refresh_token';
 const USER_KEY = 'coverme_user_data';
 
 export const authStorage = {
@@ -42,6 +43,43 @@ export const authStorage = {
     }
   },
 
+  async saveRefreshToken(token: string): Promise<void> {
+    try {
+      if (Platform.OS === 'web') {
+        localStorage.setItem(REFRESH_TOKEN_KEY, token);
+      } else {
+        await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, token);
+      }
+    } catch (error) {
+      console.warn('Error saving refresh token:', error);
+    }
+  },
+
+  async getRefreshToken(): Promise<string | null> {
+    try {
+      if (Platform.OS === 'web') {
+        return localStorage.getItem(REFRESH_TOKEN_KEY);
+      } else {
+        return await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+      }
+    } catch (error) {
+      console.warn('Error retrieving refresh token:', error);
+      return null;
+    }
+  },
+
+  async deleteRefreshToken(): Promise<void> {
+    try {
+      if (Platform.OS === 'web') {
+        localStorage.removeItem(REFRESH_TOKEN_KEY);
+      } else {
+        await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      }
+    } catch (error) {
+      console.warn('Error deleting refresh token:', error);
+    }
+  },
+
   async saveUserData(userData: any): Promise<void> {
     try {
       const dataStr = JSON.stringify(userData);
@@ -74,9 +112,11 @@ export const authStorage = {
     try {
       if (Platform.OS === 'web') {
         localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(REFRESH_TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
       } else {
         await SecureStore.deleteItemAsync(TOKEN_KEY);
+        await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
         await SecureStore.deleteItemAsync(USER_KEY);
       }
     } catch (error) {

@@ -31,7 +31,22 @@ from .admin import setup_admin
 # Create database tables (simple approach for MVP development)
 Base.metadata.create_all(bind=engine)
 
+import asyncio
 messaging_service = MessagingService()
+
+def dispatch_push_notification(user_id: int, title: str, message: str, db: Session):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if user and user.push_token:
+        try:
+            asyncio.create_task(messaging_service.send_push_via_expo(
+                push_token=user.push_token,
+                title=title,
+                body=message,
+                data={"title": title, "body": message}
+            ))
+        except Exception as err:
+            print(f"[Push Dispatch Exception] Could not dispatch push: {err}")
+
 
 # Initialize Rate Limiter
 redis_url = os.getenv("REDIS_URL")
@@ -102,6 +117,9 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     phone_number: Optional[str] = None
 
+class PushTokenRequest(BaseModel):
+    push_token: str
+
 class ContactCreate(BaseModel):
     name: str
     phone_number: str
@@ -128,22 +146,55 @@ class SOSTrigger(BaseModel):
 class JourneyStart(BaseModel):
     start_location: str
     destination: str
-    emergency_contact_phone: str
+    emergency_contact_phone: Optional[str] = None
     duration_minutes: int
     license_plate: Optional[str] = None
+    watcher_type: Optional[str] = None # 'member' or 'circle'
+    watcher_id: Optional[int] = None
 
 class JourneyResponse(BaseModel):
     id: int
     start_location: str
     destination: str
-    emergency_contact_phone: str
+    emergency_contact_phone: Optional[str] = None
     duration_minutes: int
     license_plate: Optional[str] = None
+    watcher_type: Optional[str] = None
+    watcher_id: Optional[int] = None
     is_active: bool
     started_at: datetime.datetime
 
     class Config:
         from_attributes = True
+
+class SOSActiveResponse(BaseModel):
+    id: int
+    user_id: int
+    status: str
+    trigger_source: str
+    triggered_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+
+class NotificationResponse(BaseModel):
+    id: int
+    user_id: int
+    type: str
+    title: str
+    message: str
+    read: bool
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CircleInviteRequest(BaseModel):
+    recipient_email_or_phone: str
+    role: Optional[str] = "Member"
+
 
 class CommandLineResponse(BaseModel):
     id: int
@@ -155,6 +206,41 @@ class CommandLineResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class CircleCreate(BaseModel):
+    name: str
+    category: str
+    role: str
+
+
+class CircleJoin(BaseModel):
+    invite_code: str
+    role: str
+
+
+class CircleMemberResponse(BaseModel):
+    user_id: int
+    full_name: str
+    phone_number: str
+    role: str
+    joined_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CircleResponse(BaseModel):
+    id: int
+    name: str
+    category: str
+    invite_code: str
+    created_at: datetime.datetime
+    members: List[CircleMemberResponse]
+
+    class Config:
+        from_attributes = True
+
 
 # --- Auth Helpers ---
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -206,9 +292,45 @@ async def get_authenticated_user(
 
 
 # --- Startup Seeding ---
+def patch_database_schema(db: Session):
+    from sqlalchemy import text
+    dialect = db.bind.dialect.name
+    if dialect == "postgresql":
+        try:
+            db.execute(text("ALTER TABLE journeys ADD COLUMN IF NOT EXISTS watcher_type VARCHAR;"))
+            db.execute(text("ALTER TABLE journeys ADD COLUMN IF NOT EXISTS watcher_id INTEGER;"))
+            db.execute(text("ALTER TABLE journeys ALTER COLUMN emergency_contact_phone DROP NOT NULL;"))
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_lat DOUBLE PRECISION;"))
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_lng DOUBLE PRECISION;"))
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS location_updated_at TIMESTAMP;"))
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS push_token VARCHAR;"))
+            db.commit()
+            print("[Startup Migration] PostgreSQL schema successfully patched.")
+        except Exception as e:
+            db.rollback()
+            print(f"[Startup Migration Error] Failed to patch PostgreSQL: {e}")
+    else:
+        # SQLite fallback
+        for query in [
+            "ALTER TABLE journeys ADD COLUMN watcher_type VARCHAR;",
+            "ALTER TABLE journeys ADD COLUMN watcher_id INTEGER;",
+            "ALTER TABLE users ADD COLUMN last_lat FLOAT;",
+            "ALTER TABLE users ADD COLUMN last_lng FLOAT;",
+            "ALTER TABLE users ADD COLUMN location_updated_at TIMESTAMP;",
+            "ALTER TABLE users ADD COLUMN push_token VARCHAR;"
+        ]:
+            try:
+                db.execute(text(query))
+                db.commit()
+            except Exception:
+                db.rollback()
+        print("[Startup Migration] SQLite fallback migration run complete.")
+
 @app.on_event("startup")
 def seed_database():
     db = next(get_db())
+    # Patch schema first
+    patch_database_schema(db)
     # Seed emergency command lines if empty
     if db.query(models.EmergencyCommandLine).count() == 0:
         seed_data = [
@@ -349,6 +471,16 @@ def update_user(
     db.refresh(current_user)
     return current_user
 
+@app.post("/users/push-token")
+def register_push_token(
+    payload: PushTokenRequest,
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    current_user.push_token = payload.push_token
+    db.commit()
+    return {"status": "success", "message": "Push token registered successfully."}
+
 @app.post("/user/delete")
 def delete_user(
     current_user: models.User = Depends(get_authenticated_user),
@@ -375,6 +507,11 @@ def add_contact(
     current_user: models.User = Depends(get_authenticated_user),
     db: Session = Depends(get_db)
 ):
+    # Enforce maximum of 3 emergency contacts
+    existing_count = db.query(models.TrustedContact).filter(models.TrustedContact.user_id == current_user.id).count()
+    if existing_count >= 3:
+        raise HTTPException(status_code=400, detail="Maximum of 3 emergency contacts reached.")
+
     new_contact = models.TrustedContact(
         user_id=current_user.id,
         name=contact.name,
@@ -392,6 +529,44 @@ def get_contacts(
     db: Session = Depends(get_db)
 ):
     return db.query(models.TrustedContact).filter(models.TrustedContact.user_id == current_user.id).all()
+
+@app.post("/contacts/{contact_id}/update", response_model=ContactResponse)
+def update_contact(
+    contact_id: int,
+    contact_data: ContactCreate,
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    db_contact = db.query(models.TrustedContact).filter(
+        models.TrustedContact.id == contact_id,
+        models.TrustedContact.user_id == current_user.id
+    ).first()
+    if not db_contact:
+        raise HTTPException(status_code=404, detail="Emergency contact not found.")
+    
+    db_contact.name = contact_data.name
+    db_contact.phone_number = contact_data.phone_number
+    db_contact.relation = contact_data.relation
+    db.commit()
+    db.refresh(db_contact)
+    return db_contact
+
+@app.delete("/contacts/{contact_id}")
+def delete_contact(
+    contact_id: int,
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    db_contact = db.query(models.TrustedContact).filter(
+        models.TrustedContact.id == contact_id,
+        models.TrustedContact.user_id == current_user.id
+    ).first()
+    if not db_contact:
+        raise HTTPException(status_code=404, detail="Emergency contact not found.")
+    
+    db.delete(db_contact)
+    db.commit()
+    return {"status": "success", "message": "Emergency contact deleted successfully."}
 
 import math
 
@@ -436,6 +611,12 @@ def update_location(
     current_user: models.User = Depends(get_authenticated_user),
     db: Session = Depends(get_db)
 ):
+    # Update coordinates in DB
+    current_user.last_lat = loc.lat
+    current_user.last_lng = loc.lng
+    current_user.location_updated_at = datetime.datetime.utcnow()
+    db.commit()
+
     # Log location updates to standard output (acting as location sync layer)
     print(f"[Location Sync] User {current_user.id} ({current_user.full_name}) moved to Lat: {loc.lat}, Lng: {loc.lng}")
     
@@ -490,7 +671,36 @@ async def trigger_sos(
 
     # Query User's Trusted Contacts
     contacts = db.query(models.TrustedContact).filter(models.TrustedContact.user_id == current_user.id).all()
-    contact_numbers = [c.phone_number for c in contacts]
+    contact_numbers = set(c.phone_number for c in contacts)
+
+    # Query all users in the circles the current user belongs to
+    my_memberships = db.query(models.CircleMember).filter(models.CircleMember.user_id == current_user.id).all()
+    my_circle_ids = [m.circle_id for m in my_memberships]
+    
+    if my_circle_ids:
+        circle_members = db.query(models.CircleMember).filter(
+            models.CircleMember.circle_id.in_(my_circle_ids),
+            models.CircleMember.user_id != current_user.id
+        ).all()
+        for cm in circle_members:
+            # Create in-app notification for each circle member
+            new_notif = models.Notification(
+                user_id=cm.user_id,
+                type="sos_alert",
+                title="Emergency SOS Alert!",
+                message=f"{current_user.full_name} ({current_user.phone_number}) triggered an SOS emergency alert!"
+            )
+            db.add(new_notif)
+        db.commit()
+        for cm in circle_members:
+            dispatch_push_notification(
+                user_id=cm.user_id,
+                title="Emergency SOS Alert!",
+                message=f"{current_user.full_name} ({current_user.phone_number}) triggered an SOS emergency alert!",
+                db=db
+            )
+                
+    contact_numbers_list = list(contact_numbers)
 
     # Build safety alert template with plaintext coordinates for maps link
     timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -502,7 +712,7 @@ async def trigger_sos(
     background_tasks.add_task(
         tasks.run_sos_delivery_task,
         sos_id=new_sos.id,
-        contacts=contact_numbers,
+        contacts=contact_numbers_list,
         user_name=current_user.full_name,
         location_link=location_link,
         timestamp=timestamp_str,
@@ -513,7 +723,7 @@ async def trigger_sos(
         "status": "triggered",
         "sos_id": new_sos.id,
         "source": sos.trigger_source,
-        "recipient_contacts_count": len(contact_numbers),
+        "recipient_contacts_count": len(contact_numbers_list),
         "message": "SOS alert triggered successfully. Dispatches are processing asynchronously."
     }
 
@@ -535,6 +745,35 @@ async def trigger_sos_voice(
         background_tasks=background_tasks
     )
 
+@app.get("/sos/active", response_model=Optional[SOSActiveResponse])
+def get_active_sos(
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    """Return the current user's active SOS alert, or null if none."""
+    alert = db.query(models.SOSAlert).filter(
+        models.SOSAlert.user_id == current_user.id,
+        models.SOSAlert.status == "active"
+    ).order_by(models.SOSAlert.triggered_at.desc()).first()
+    return alert  # None returns as JSON null (Optional response)
+
+@app.post("/sos/resolve")
+def resolve_sos(
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    """Mark the current user's active SOS alert as resolved."""
+    alerts = db.query(models.SOSAlert).filter(
+        models.SOSAlert.user_id == current_user.id,
+        models.SOSAlert.status == "active"
+    ).all()
+    if not alerts:
+        return {"status": "ok", "message": "No active SOS to resolve."}
+    for alert in alerts:
+        alert.status = "resolved"
+    db.commit()
+    return {"status": "resolved", "count": len(alerts)}
+
 # Follow Me Journey tracking
 @app.post("/journey/start", response_model=JourneyResponse)
 async def start_journey(
@@ -549,29 +788,78 @@ async def start_journey(
         models.Journey.is_active == True
     ).update({"is_active": False})
 
+    # Resolve watchers
+    phones = []
+    watchers_users = []
+    
+    if journey.watcher_type == "member" and journey.watcher_id:
+        watcher_user = db.query(models.User).filter(models.User.id == journey.watcher_id).first()
+        if watcher_user:
+            watchers_users.append(watcher_user)
+            if watcher_user.phone_number:
+                phones.append(watcher_user.phone_number)
+    elif journey.watcher_type == "circle" and journey.watcher_id:
+        memberships = db.query(models.CircleMember).filter(
+            models.CircleMember.circle_id == journey.watcher_id,
+            models.CircleMember.user_id != current_user.id
+        ).all()
+        for m in memberships:
+            watcher_user = db.query(models.User).filter(models.User.id == m.user_id).first()
+            if watcher_user:
+                watchers_users.append(watcher_user)
+                if watcher_user.phone_number:
+                    phones.append(watcher_user.phone_number)
+    
+    if not phones and journey.emergency_contact_phone:
+        # Fallback to direct raw input phone number if no circle selection was processed
+        phones = [journey.emergency_contact_phone]
+
+    phone_str = ",".join(set(phones)) if phones else None
+
     new_journey = models.Journey(
         user_id=current_user.id,
         start_location=journey.start_location,
         destination=journey.destination,
-        emergency_contact_phone=journey.emergency_contact_phone,
+        emergency_contact_phone=phone_str,
         duration_minutes=journey.duration_minutes,
         license_plate=journey.license_plate,
+        watcher_type=journey.watcher_type,
+        watcher_id=journey.watcher_id,
         is_active=True
     )
     db.add(new_journey)
     db.commit()
     db.refresh(new_journey)
 
+    # Dispatch in-app notifications
+    for wu in watchers_users:
+        notif = models.Notification(
+            user_id=wu.id,
+            type="journey_start",
+            title="Circle Member Journey Started",
+            message=f"{current_user.full_name} started a journey from {journey.start_location} to {journey.destination}."
+        )
+        db.add(notif)
+    db.commit()
+    for wu in watchers_users:
+        dispatch_push_notification(
+            user_id=wu.id,
+            title="Circle Member Journey Started",
+            message=f"{current_user.full_name} started a journey from {journey.start_location} to {journey.destination}.",
+            db=db
+        )
+
     # Queue out-of-band watchers notifications
-    background_tasks.add_task(
-        tasks.run_journey_start_task,
-        recipient=journey.emergency_contact_phone,
-        user_name=current_user.full_name,
-        start_location=journey.start_location,
-        destination=journey.destination,
-        duration_minutes=journey.duration_minutes,
-        license_plate=journey.license_plate or ""
-    )
+    for phone in set(phones):
+        background_tasks.add_task(
+            tasks.run_journey_start_task,
+            recipient=phone,
+            user_name=current_user.full_name,
+            start_location=journey.start_location,
+            destination=journey.destination,
+            duration_minutes=journey.duration_minutes,
+            license_plate=journey.license_plate or ""
+        )
 
     return new_journey
 
@@ -611,6 +899,35 @@ async def upload_vehicle_photo(
         "ocr_license_plate_detected": detected_plate,
         "journey": journey
     }
+
+@app.get("/journey/my-active", response_model=Optional[JourneyResponse])
+def get_my_active_journey(
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    """Return the current user's own active journey, or null if none."""
+    journey = db.query(models.Journey).filter(
+        models.Journey.user_id == current_user.id,
+        models.Journey.is_active == True
+    ).order_by(models.Journey.started_at.desc()).first()
+    return journey  # None returns as JSON null
+
+@app.post("/journey/end")
+def end_journey(
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    """Mark the current user's active journey as ended."""
+    journeys = db.query(models.Journey).filter(
+        models.Journey.user_id == current_user.id,
+        models.Journey.is_active == True
+    ).all()
+    if not journeys:
+        return {"status": "ok", "message": "No active journey to end."}
+    for j in journeys:
+        j.is_active = False
+    db.commit()
+    return {"status": "ended", "count": len(journeys)}
 
 # Direct Command Lines DB Search
 @app.get("/emergency/command-lines", response_model=List[CommandLineResponse])
@@ -653,4 +970,334 @@ def get_command_lines(
         })
     cache_service.set(cache_key, serializable, expire_seconds=3600)
     
+    return results
+
+
+# --- Circle Management Routes ---
+
+import random
+import string
+
+def generate_invite_code(db: Session) -> str:
+    # Format: ZJE-ITS (3 letters, dash, 3 letters)
+    letters = string.ascii_uppercase
+    while True:
+        part1 = "".join(random.choice(letters) for _ in range(3))
+        part2 = "".join(random.choice(letters) for _ in range(3))
+        code = f"{part1}-{part2}"
+        # Check if code is unique
+        exists = db.query(models.Circle).filter(models.Circle.invite_code == code).first()
+        if not exists:
+            return code
+
+
+@app.post("/circles/create", response_model=CircleResponse)
+def create_circle(
+    circle_data: CircleCreate,
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    invite_code = generate_invite_code(db)
+    new_circle = models.Circle(
+        name=circle_data.name,
+        category=circle_data.category,
+        invite_code=invite_code
+    )
+    db.add(new_circle)
+    db.commit()
+    db.refresh(new_circle)
+
+    # Add creator as a member
+    member = models.CircleMember(
+        circle_id=new_circle.id,
+        user_id=current_user.id,
+        role=circle_data.role
+    )
+    db.add(member)
+    db.commit()
+    
+    return get_circle_response(new_circle.id, db)
+
+
+@app.post("/circles/join", response_model=CircleResponse)
+def join_circle(
+    join_data: CircleJoin,
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    # Find circle by invite code
+    code = join_data.invite_code.strip().upper()
+    circle = db.query(models.Circle).filter(models.Circle.invite_code == code).first()
+    if not circle:
+        raise HTTPException(status_code=404, detail="Circle invite code not found.")
+
+    # Check if user is already a member
+    existing_member = db.query(models.CircleMember).filter(
+        models.CircleMember.circle_id == circle.id,
+        models.CircleMember.user_id == current_user.id
+    ).first()
+    if existing_member:
+        # Just update role
+        existing_member.role = join_data.role
+        db.commit()
+    else:
+        # Create new member
+        new_member = models.CircleMember(
+            circle_id=circle.id,
+            user_id=current_user.id,
+            role=join_data.role
+        )
+        db.add(new_member)
+        db.commit()
+
+        # In-app notifications to other members
+        other_members = db.query(models.CircleMember).filter(
+            models.CircleMember.circle_id == circle.id,
+            models.CircleMember.user_id != current_user.id
+        ).all()
+        for om in other_members:
+            new_notif = models.Notification(
+                user_id=om.user_id,
+                type="circle_join",
+                title="New Circle Member",
+                message=f"{current_user.full_name} has joined the circle '{circle.name}' as {join_data.role}."
+            )
+            db.add(new_notif)
+        db.commit()
+        for om in other_members:
+            dispatch_push_notification(
+                user_id=om.user_id,
+                title="New Circle Member",
+                message=f"{current_user.full_name} has joined the circle '{circle.name}' as {join_data.role}.",
+                db=db
+            )
+
+    return get_circle_response(circle.id, db)
+
+
+@app.get("/circles/my", response_model=List[CircleResponse])
+def get_my_circles(
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    # Find all circles where current_user is a member
+    memberships = db.query(models.CircleMember).filter(models.CircleMember.user_id == current_user.id).all()
+    circle_ids = [m.circle_id for m in memberships]
+    
+    response = []
+    for cid in circle_ids:
+        response.append(get_circle_response(cid, db))
+    return response
+
+
+@app.post("/circles/{circle_id}/leave")
+def leave_circle(
+    circle_id: int,
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    # Find member record
+    member = db.query(models.CircleMember).filter(
+        models.CircleMember.circle_id == circle_id,
+        models.CircleMember.user_id == current_user.id
+    ).first()
+    if not member:
+        raise HTTPException(status_code=404, detail="Circle membership not found.")
+
+    db.delete(member)
+    db.commit()
+
+    # If circle has no members left, delete the circle entirely
+    remaining = db.query(models.CircleMember).filter(models.CircleMember.circle_id == circle_id).count()
+    if remaining == 0:
+        circle = db.query(models.Circle).filter(models.Circle.id == circle_id).first()
+        if circle:
+            db.delete(circle)
+            db.commit()
+
+    return {"status": "success", "message": "Successfully left the circle."}
+
+
+# Helper function to construct rich CircleResponse
+def get_circle_response(circle_id: int, db: Session):
+    circle = db.query(models.Circle).filter(models.Circle.id == circle_id).first()
+    if not circle:
+        raise HTTPException(status_code=404, detail="Circle not found")
+        
+    members_list = []
+    members = db.query(models.CircleMember).filter(models.CircleMember.circle_id == circle_id).all()
+    for m in members:
+        user = db.query(models.User).filter(models.User.id == m.user_id).first()
+        if user:
+            members_list.append({
+                "user_id": user.id,
+                "full_name": user.full_name,
+                "phone_number": user.phone_number,
+                "role": m.role,
+                "joined_at": m.joined_at
+            })
+    return {
+        "id": circle.id,
+        "name": circle.name,
+        "category": circle.category,
+        "invite_code": circle.invite_code,
+        "created_at": circle.created_at,
+        "members": members_list
+    }
+
+
+# --- Notifications & Live Watched Journey Endpoints ---
+
+@app.get("/notifications", response_model=List[NotificationResponse])
+def get_notifications(
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    return db.query(models.Notification).filter(
+        models.Notification.user_id == current_user.id
+    ).order_by(models.Notification.created_at.desc()).all()
+
+
+@app.post("/notifications/{notification_id}/read")
+def mark_notification_read(
+    notification_id: int,
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    notif = db.query(models.Notification).filter(
+        models.Notification.id == notification_id,
+        models.Notification.user_id == current_user.id
+    ).first()
+    if not notif:
+        raise HTTPException(status_code=404, detail="Notification not found.")
+    
+    notif.read = True
+    db.commit()
+    return {"status": "success", "message": "Notification marked as read."}
+
+
+@app.post("/notifications/read-all")
+def mark_all_notifications_read(
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    db.query(models.Notification).filter(
+        models.Notification.user_id == current_user.id,
+        models.Notification.read == False
+    ).update({"read": True}, synchronize_session=False)
+    db.commit()
+    return {"status": "success", "message": "All notifications marked as read."}
+
+
+@app.post("/circles/{circle_id}/invite")
+def invite_to_circle(
+    circle_id: int,
+    invite_req: CircleInviteRequest,
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    # Ensure user is a member of this circle
+    membership = db.query(models.CircleMember).filter(
+        models.CircleMember.circle_id == circle_id,
+        models.CircleMember.user_id == current_user.id
+    ).first()
+    if not membership:
+        raise HTTPException(status_code=403, detail="You do not belong to this circle.")
+        
+    circle = db.query(models.Circle).filter(models.Circle.id == circle_id).first()
+    if not circle:
+        raise HTTPException(status_code=404, detail="Circle not found.")
+        
+    # Find recipient by email or phone
+    term = invite_req.recipient_email_or_phone.strip()
+    recipient = db.query(models.User).filter(
+        (models.User.email == term) | (models.User.phone_number == term)
+    ).first()
+    if not recipient:
+        raise HTTPException(status_code=404, detail="No registered CoverMe user found with this email or phone number.")
+        
+    # Check if already a member
+    is_member = db.query(models.CircleMember).filter(
+        models.CircleMember.circle_id == circle_id,
+        models.CircleMember.user_id == recipient.id
+    ).first()
+    if is_member:
+        raise HTTPException(status_code=400, detail="User is already a member of this circle.")
+        
+    invite_msg = f"{current_user.full_name} invited you to join circle '{circle.name}'. Use invite code: {circle.invite_code}."
+    notif = models.Notification(
+        user_id=recipient.id,
+        type="circle_invite",
+        title="Circle Invitation",
+        message=invite_msg
+    )
+    db.add(notif)
+    db.commit()
+    dispatch_push_notification(
+        user_id=recipient.id,
+        title="Circle Invitation",
+        message=invite_msg,
+        db=db
+    )
+    
+    return {"status": "success", "message": f"Invitation successfully sent to {recipient.full_name}."}
+
+
+class ActiveWatchedJourney(BaseModel):
+    journey_id: int
+    traveler_id: int
+    traveler_name: str
+    start_location: str
+    destination: str
+    duration_minutes: int
+    license_plate: Optional[str] = None
+    started_at: datetime.datetime
+    last_lat: Optional[float] = None
+    last_lng: Optional[float] = None
+    location_updated_at: Optional[datetime.datetime] = None
+
+
+@app.get("/journey/active-watched", response_model=List[ActiveWatchedJourney])
+def get_active_watched_journeys(
+    current_user: models.User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    # Find all circles where current_user is a member
+    memberships = db.query(models.CircleMember).filter(models.CircleMember.user_id == current_user.id).all()
+    my_circle_ids = [m.circle_id for m in memberships]
+    
+    # Query active journeys of other users
+    query = db.query(models.Journey).filter(
+        models.Journey.is_active == True,
+        models.Journey.user_id != current_user.id
+    )
+    
+    if my_circle_ids:
+        journeys = query.filter(
+            ((models.Journey.watcher_type == "circle") & (models.Journey.watcher_id.in_(my_circle_ids))) |
+            ((models.Journey.watcher_type == "member") & (models.Journey.watcher_id == current_user.id))
+        ).all()
+    else:
+        journeys = query.filter(
+            (models.Journey.watcher_type == "member") & (models.Journey.watcher_id == current_user.id)
+        ).all()
+        
+    results = []
+    for j in journeys:
+        traveler = db.query(models.User).filter(models.User.id == j.user_id).first()
+        if traveler:
+            results.append({
+                "journey_id": j.id,
+                "traveler_id": traveler.id,
+                "traveler_name": traveler.full_name,
+                "start_location": j.start_location,
+                "destination": j.destination,
+                "duration_minutes": j.duration_minutes,
+                "license_plate": j.license_plate,
+                "started_at": j.started_at,
+                "last_lat": traveler.last_lat,
+                "last_lng": traveler.last_lng,
+                "location_updated_at": traveler.location_updated_at
+            })
+            
     return results

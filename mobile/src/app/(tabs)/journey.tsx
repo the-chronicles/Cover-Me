@@ -11,16 +11,25 @@ import { useLocationTracking } from '@/hooks/useLocationTracking';
 import * as ImagePicker from 'expo-image-picker';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { useTheme } from '@/hooks/use-theme';
+import { useAuth } from '@/hooks/useAuth';
+import { useRouter } from 'expo-router';
 
 export default function JourneyScreen() {
   const theme = useTheme();
+  const router = useRouter();
+  const { user } = useAuth();
   const { showAlert, showToast } = useAlert();
   const [startLoc, setStartLoc] = useState('');
   const [destination, setDestination] = useState('');
-  const [contact, setContact] = useState('');
   const [duration, setDuration] = useState('');
   const [licensePlate, setLicensePlate] = useState('');
   const [platePhoto, setPlatePhoto] = useState<string | null>(null);
+
+  // Watcher selection states
+  const [circles, setCircles] = useState<any[]>([]);
+  const [selectedCircleId, setSelectedCircleId] = useState<number | null>(null);
+  const [watcherMode, setWatcherMode] = useState<'circle' | 'member'>('circle');
+  const [selectedMemberId, setSelectedMemberId] = useState<number | null>(null);
 
   // State for active journey
   const [activeJourney, setActiveJourney] = useState<Journey | null>(null);
@@ -48,9 +57,53 @@ export default function JourneyScreen() {
     }
   }, [location, activeJourney]);
 
+  // Load safety circles on mount + restore any active journey from backend
+  useEffect(() => {
+    async function loadCircles() {
+      try {
+        const data = await apiService.getMyCircles();
+        setCircles(data);
+        if (data.length > 0) {
+          setSelectedCircleId(data[0].id);
+        }
+      } catch (err) {
+        console.warn("Could not load circles", err);
+      }
+    }
+    loadCircles();
+
+    // Restore active journey session from backend on startup
+    apiService.getMyActiveJourney().then((activeJ) => {
+      if (activeJ && activeJ.is_active) {
+        console.log('[Journey] Restoring active journey session:', activeJ.id);
+        setActiveJourney(activeJ);
+        setStartLoc(activeJ.start_location);
+        setDestination(activeJ.destination);
+        setDuration(String(activeJ.duration_minutes));
+        if (activeJ.license_plate) setLicensePlate(activeJ.license_plate);
+      }
+    }).catch((err) => console.warn('[Journey] Could not restore journey state:', err));
+  }, []);
+
   const handleStartJourney = async () => {
-    if (!startLoc || !destination || !contact || !duration) {
-      showToast('Please provide start location, destination, emergency contact, and duration.', 'error');
+    if (!startLoc || !destination || !duration) {
+      showToast('Please provide start location, destination, and duration.', 'error');
+      return;
+    }
+
+    if (circles.length === 0) {
+      showToast('Please create or join a circle to select a watcher.', 'error');
+      return;
+    }
+
+    const activeCircle = circles.find(c => c.id === selectedCircleId);
+    if (!activeCircle) {
+      showToast('Please select a circle.', 'error');
+      return;
+    }
+
+    if (watcherMode === 'member' && !selectedMemberId) {
+      showToast('Please select a circle member as your watcher.', 'error');
       return;
     }
 
@@ -61,13 +114,17 @@ export default function JourneyScreen() {
         return;
       }
 
-      const journey = await apiService.startJourney({
+      // Resolve watcher details
+      const payload: any = {
         start_location: startLoc,
         destination,
-        emergency_contact_phone: contact,
         duration_minutes: minutes,
-        license_plate: licensePlate || undefined
-      });
+        license_plate: licensePlate || undefined,
+        watcher_type: watcherMode,
+        watcher_id: watcherMode === 'circle' ? selectedCircleId : selectedMemberId
+      };
+
+      const journey = await apiService.startJourney(payload);
 
       setActiveJourney(journey);
 
@@ -76,7 +133,6 @@ export default function JourneyScreen() {
         try {
           const photoResponse = await apiService.uploadVehiclePhoto(journey.id, platePhoto, licensePlate);
           setLicensePlate(photoResponse.ocr_license_plate_detected);
-          // Update local active journey representation with parsed plate
           setActiveJourney(prev => prev ? { ...prev, license_plate: photoResponse.ocr_license_plate_detected } : null);
         } catch (photoErr) {
           console.warn("Plate photo upload offline fallback active.");
@@ -85,24 +141,39 @@ export default function JourneyScreen() {
         }
       }
 
+      // Compile watcher description text
+      let watcherDesc = '';
+      if (watcherMode === 'circle') {
+        watcherDesc = `circle "${activeCircle.name}"`;
+      } else {
+        const mem = activeCircle.members.find((m: any) => m.user_id === selectedMemberId);
+        watcherDesc = mem ? mem.full_name : 'selected watcher';
+      }
+
       showAlert(
         'Follow Me Journey Started',
-        `Continuous location updates are now sharing with ${contact} for your trip from ${startLoc} to ${destination}.`
+        `Continuous location updates are now sharing with ${watcherDesc} for your trip from ${startLoc} to ${destination}.`
       );
     } catch (err) {
       showToast('Could not sync with the API server. Please check your network.', 'error');
     }
   };
 
-  const handleEndJourney = () => {
+  const handleEndJourney = async () => {
     setActiveJourney(null);
     setStartLoc('');
     setDestination('');
-    setContact('');
     setDuration('');
     setLicensePlate('');
     setPlatePhoto(null);
     showToast('Journey Ended: Location sharing ceased.', 'info');
+    // Mark the journey as ended on the backend so it doesn't resurface on restart
+    try {
+      await apiService.endJourney();
+      console.log('[Journey] Marked as ended on backend.');
+    } catch (err) {
+      console.warn('[Journey] Could not notify backend of journey end:', err);
+    }
   };
 
   const handleCaptureLicensePlate = async () => {
@@ -181,7 +252,7 @@ export default function JourneyScreen() {
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
-            <ThemedText style={styles.title}>Follow Me Journey</ThemedText>
+            <ThemedText style={styles.title}>Follow Me</ThemedText>
             <ThemedText themeColor="textSecondary" style={styles.subtitle}>Continuous safety tracking for your route</ThemedText>
           </View>
 
@@ -262,7 +333,7 @@ export default function JourneyScreen() {
                 >
                   <Marker
                     coordinate={{ latitude: location.latitude, longitude: location.longitude }}
-                    title="Current Location"
+                    title={`${user?.full_name || 'You'} (Traveler)`}
                     description="Continuous safety stream active"
                     pinColor="#2563EB"
                   />
@@ -325,18 +396,6 @@ export default function JourneyScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <ThemedText type="small" themeColor="textSecondary" style={styles.label}>Designated Emergency Watcher Phone</ThemedText>
-                <TextInput
-                  style={{ ...styles.input, backgroundColor: theme.backgroundElement, color: theme.text, borderColor: theme.backgroundSelected }}
-                  placeholder="e.g. +2348033011234"
-                  placeholderTextColor={theme.textSecondary}
-                  keyboardType="phone-pad"
-                  value={contact}
-                  onChangeText={setContact}
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
                 <ThemedText type="small" themeColor="textSecondary" style={styles.label}>Estimated Journey Time (minutes)</ThemedText>
                 <TextInput
                   style={{ ...styles.input, backgroundColor: theme.backgroundElement, color: theme.text, borderColor: theme.backgroundSelected }}
@@ -348,28 +407,177 @@ export default function JourneyScreen() {
                 />
               </View>
 
+              {/* WATCHER SELECTION LAYER */}
+              <View style={styles.inputGroup}>
+                <ThemedText type="small" themeColor="textSecondary" style={styles.label}>Designated Emergency Watchers</ThemedText>
+                {circles.length === 0 ? (
+                  <ThemedView type="backgroundElement" style={styles.noCirclesCard}>
+                    <Ionicons name="warning-outline" size={24} color="#F59E0B" />
+                    <ThemedText style={{ fontSize: 13, textAlign: 'center', marginTop: 4 }}>
+                      You need to join or create a circle first to select journey watchers.
+                    </ThemedText>
+                    <Pressable
+                      onPress={() => router.push('/contacts')}
+                      style={{ backgroundColor: theme.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginTop: 8 }}
+                    >
+                      <ThemedText type="smallBold" style={{ color: '#FFFFFF' }}>Go to Circles Screen</ThemedText>
+                    </Pressable>
+                  </ThemedView>
+                ) : (
+                  <View style={{ gap: 10 }}>
+                    {/* Circle selector row */}
+                    <ThemedText type="smallBold">1. Select Circle</ThemedText>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                      {circles.map((c) => {
+                        const isSelected = selectedCircleId === c.id;
+                        return (
+                          <Pressable
+                            key={c.id}
+                            onPress={() => {
+                              setSelectedCircleId(c.id);
+                              // Reset member selection when changing circle
+                              const circleMem = c.members.filter((m: any) => m.user_id !== user?.id);
+                              if (circleMem.length > 0) {
+                                setSelectedMemberId(circleMem[0].user_id);
+                              } else {
+                                setSelectedMemberId(null);
+                              }
+                            }}
+                            style={[
+                              styles.circleSelectorBtn,
+                              {
+                                backgroundColor: isSelected ? theme.primary : theme.backgroundElement,
+                                borderColor: theme.backgroundSelected
+                              }
+                            ]}
+                          >
+                            <ThemedText style={{ color: isSelected ? '#FFFFFF' : theme.text, fontSize: 12, fontWeight: isSelected ? 'bold' : 'normal' }}>
+                              {c.name}
+                            </ThemedText>
+                          </Pressable>
+                        );
+                      })}
+                    </ScrollView>
+
+                    {/* Mode selector: Whole Circle vs Member */}
+                    <ThemedText type="smallBold">2. Watcher Target</ThemedText>
+                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                      <Pressable
+                        onPress={() => setWatcherMode('circle')}
+                        style={[
+                          styles.modeBtn,
+                          {
+                            flex: 1,
+                            backgroundColor: watcherMode === 'circle' ? theme.primary : theme.backgroundElement,
+                            borderColor: theme.backgroundSelected
+                          }
+                        ]}
+                      >
+                        <Ionicons name="people-outline" size={16} color={watcherMode === 'circle' ? '#FFFFFF' : theme.text} />
+                        <ThemedText style={{ color: watcherMode === 'circle' ? '#FFFFFF' : theme.text, fontSize: 12 }}>Whole Circle</ThemedText>
+                      </Pressable>
+
+                      <Pressable
+                        onPress={() => {
+                          setWatcherMode('member');
+                          // Initialize member selection
+                          const selectedC = circles.find(c => c.id === selectedCircleId);
+                          const members = selectedC ? selectedC.members.filter((m: any) => m.user_id !== user?.id) : [];
+                          if (members.length > 0) {
+                            setSelectedMemberId(members[0].user_id);
+                          }
+                        }}
+                        style={[
+                          styles.modeBtn,
+                          {
+                            flex: 1,
+                            backgroundColor: watcherMode === 'member' ? theme.primary : theme.backgroundElement,
+                            borderColor: theme.backgroundSelected
+                          }
+                        ]}
+                      >
+                        <Ionicons name="person-outline" size={16} color={watcherMode === 'member' ? '#FFFFFF' : theme.text} />
+                        <ThemedText style={{ color: watcherMode === 'member' ? '#FFFFFF' : theme.text, fontSize: 12 }}>Single Member</ThemedText>
+                      </Pressable>
+                    </View>
+
+                    {/* Member selector list if Single Member mode */}
+                    {watcherMode === 'member' && (
+                      <View style={{ gap: 6 }}>
+                        <ThemedText type="smallBold">3. Select Watching Member</ThemedText>
+                        {(() => {
+                          const activeC = circles.find(c => c.id === selectedCircleId);
+                          const members = activeC ? activeC.members.filter((m: any) => m.user_id !== user?.id) : [];
+
+                          if (members.length === 0) {
+                            return (
+                              <ThemedText type="small" themeColor="textSecondary" style={{ fontStyle: 'italic', paddingVertical: 4 }}>
+                                No other members in this circle. Select "Whole Circle" or invite people to join.
+                              </ThemedText>
+                            );
+                          }
+
+                          return (
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                              {members.map((m: any) => {
+                                const isSelected = selectedMemberId === m.user_id;
+                                return (
+                                  <Pressable
+                                    key={m.user_id}
+                                    onPress={() => setSelectedMemberId(m.user_id)}
+                                    style={[
+                                      styles.circleSelectorBtn,
+                                      {
+                                        backgroundColor: isSelected ? theme.primary : theme.backgroundElement,
+                                        borderColor: theme.backgroundSelected
+                                      }
+                                    ]}
+                                  >
+                                    <ThemedText style={{ color: isSelected ? '#FFFFFF' : theme.text, fontSize: 12, fontWeight: isSelected ? 'bold' : 'normal' }}>
+                                      {m.full_name} ({m.role})
+                                    </ThemedText>
+                                  </Pressable>
+                                );
+                              })}
+                            </ScrollView>
+                          );
+                        })()}
+                      </View>
+                    )}
+                  </View>
+                )}
+              </View>
+
               {/* Vehicle Verification Plate Scanner Card */}
               <ThemedView type="backgroundElement" style={styles.plateCard}>
-                <ThemedText style={[styles.plateCardTitle, { color: theme.text }]}>Vehicle Verification</ThemedText>
+                <ThemedText style={[styles.plateCardTitle, { color: theme.text }]}>Vehicle Verification (Optional)</ThemedText>
                 <ThemedText type="small" themeColor="textSecondary" style={styles.plateCardDesc}>
-                  Capture license plate photo. CoverMe uses local OCR to scan plate details to save with your route safety packet.
+                  Enter license plate details manually, capture a photo of the vehicle plate to run local OCR, or skip it entirely.
                 </ThemedText>
+
+                <View style={{ width: '100%', gap: 6, marginVertical: Spacing.one }}>
+                  <ThemedText type="small">License Plate Number</ThemedText>
+                  <TextInput
+                    style={[styles.input, { height: 40, backgroundColor: theme.background, color: theme.text, borderColor: theme.backgroundSelected }]}
+                    placeholder="e.g. LAG-123AA (Optional)"
+                    placeholderTextColor={theme.textSecondary}
+                    value={licensePlate === 'Verify on start...' ? '' : licensePlate}
+                    onChangeText={setLicensePlate}
+                  />
+                </View>
 
                 {platePhoto ? (
                   <View style={styles.scannedRow}>
                     <View style={styles.scannedDetails}>
-                      <ThemedText type="small" themeColor="textSecondary">Scanned plate:</ThemedText>
-                      <View style={[styles.plateBadge, { backgroundColor: theme.backgroundSelected, borderColor: theme.backgroundSelected }]}>
-                        <ThemedText style={[styles.plateText, { color: theme.text }]}>{licensePlate || 'Processing...'}</ThemedText>
-                      </View>
+                      <ThemedText type="small" themeColor="textSecondary">Scanned photo loaded</ThemedText>
                     </View>
                     <Pressable onPress={() => setPlatePhoto(null)}>
-                      <ThemedText style={styles.clearText}>Clear</ThemedText>
+                      <ThemedText style={styles.clearText}>Clear Photo</ThemedText>
                     </Pressable>
                   </View>
                 ) : (
                   <Pressable style={[styles.scanButton, { backgroundColor: theme.backgroundSelected }]} onPress={handleCaptureLicensePlate}>
-                    <ThemedText style={[styles.scanButtonText, { color: theme.text }]}>📷 Capture License Plate</ThemedText>
+                    <ThemedText style={[styles.scanButtonText, { color: theme.text }]}>📷 Capture Plate Photo instead</ThemedText>
                   </Pressable>
                 )}
               </ThemedView>
@@ -622,5 +830,30 @@ const styles = StyleSheet.create({
   },
   journeyWarningAdvice: {
     fontSize: 11,
+  },
+  noCirclesCard: {
+    padding: Spacing.four,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  circleSelectorBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+  },
+  modeBtn: {
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
   },
 });
