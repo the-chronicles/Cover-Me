@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "740205621041",
+    "project_id": "coverme-82a5b",
+    "storage_bucket": "coverme-82a5b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:740205621041:android:9daedfb01971ba43ff0a10",
+        "android_client_info": {
+          "package_name": "com.chroniclesmaan.coverme"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC0sO5Yi206HWWn9H66sq0Jh6EDa5OM62Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

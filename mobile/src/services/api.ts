@@ -265,40 +265,111 @@ export const apiService = {
     return await response.json();
   },
 
+  async detectLicensePlate(photoUri: string): Promise<any> {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const token = await authStorage.getToken();
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_BASE_URL}/ocr/detect`);
+        
+        if (token) {
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        }
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch (err) {
+              reject(new Error(`Failed to parse OCR response: ${xhr.responseText}`));
+            }
+          } else {
+            reject(new Error(`OCR failed with status ${xhr.status}: ${xhr.responseText}`));
+          }
+        };
+
+        xhr.onerror = () => {
+          reject(new Error('Network connection error during license plate scan'));
+        };
+
+        const formData = new FormData();
+        const filename = photoUri.split('/').pop() || 'photo.jpg';
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? `image/${match[1]}` : `image/jpeg`;
+
+        let formattedUri = photoUri;
+        if (Platform.OS === 'android' && !photoUri.startsWith('file://') && !photoUri.startsWith('content://')) {
+          formattedUri = `file://${photoUri}`;
+        }
+
+        formData.append('photo', {
+          uri: formattedUri,
+          name: filename,
+          type,
+        } as any);
+
+        xhr.send(formData);
+      } catch (error) {
+        handleRequestError('/ocr/detect', error);
+        reject(error);
+      }
+    });
+  },
+
   async uploadVehiclePhoto(journeyId: number, photoUri: string, licensePlateText?: string): Promise<any> {
-    try {
-      const headers = await getAuthHeaders(null); // Let fetch set boundary for multipart/form-data
-      const formData = new FormData();
-      formData.append('journey_id', String(journeyId));
+    return new Promise(async (resolve, reject) => {
+      try {
+        const token = await authStorage.getToken();
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_BASE_URL}/journey/vehicle-photo?journey_id=${journeyId}`);
+        
+        if (token) {
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        }
 
-      const filename = photoUri.split('/').pop() || 'photo.jpg';
-      const match = /\.(\w+)$/.exec(filename);
-      const type = match ? `image/${match[1]}` : `image/jpeg`;
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch (err) {
+              reject(new Error(`Failed to parse upload response: ${xhr.responseText}`));
+            }
+          } else {
+            reject(new Error(`Upload failed with status ${xhr.status}: ${xhr.responseText}`));
+          }
+        };
 
-      formData.append('photo', {
-        uri: photoUri,
-        name: filename,
-        type,
-      } as any);
+        xhr.onerror = () => {
+          reject(new Error('Network connection error during file upload'));
+        };
 
-      if (licensePlateText) {
-        formData.append('license_plate', licensePlateText);
+        const formData = new FormData();
+        const filename = photoUri.split('/').pop() || 'photo.jpg';
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? `image/${match[1]}` : `image/jpeg`;
+
+        // Ensure file path is correctly formatted for Android if needed
+        let formattedUri = photoUri;
+        if (Platform.OS === 'android' && !photoUri.startsWith('file://') && !photoUri.startsWith('content://')) {
+          formattedUri = `file://${photoUri}`;
+        }
+
+        formData.append('photo', {
+          uri: formattedUri,
+          name: filename,
+          type,
+        } as any);
+
+        if (licensePlateText) {
+          formData.append('license_plate', licensePlateText);
+        }
+
+        xhr.send(formData);
+      } catch (error) {
+        handleRequestError('/journey/vehicle-photo', error);
+        reject(error);
       }
-
-      const response = await apiFetch(`${API_BASE_URL}/journey/vehicle-photo?journey_id=${journeyId}`, {
-        method: 'POST',
-        headers,
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('Photo upload failed');
-      }
-      return await response.json();
-    } catch (error) {
-      handleRequestError('/journey/vehicle-photo', error);
-      throw error;
-    }
+    });
   },
 
   async updateProfile(data: { full_name?: string; phone_number?: string }): Promise<any> {

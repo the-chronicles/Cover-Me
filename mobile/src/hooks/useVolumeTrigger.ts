@@ -71,7 +71,7 @@ export function useVolumeTrigger() {
               const { status } = await Location.requestForegroundPermissionsAsync();
               if (status === 'granted') {
                 const current = await Location.getCurrentPositionAsync({
-                  accuracy: Location.Accuracy.Balanced,
+                  accuracy: Location.Accuracy.Highest,
                 });
                 lat = current.coords.latitude;
                 lng = current.coords.longitude;

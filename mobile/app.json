@@ -8,17 +8,18 @@
     "scheme": "coverme",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
+      "icon": "./assets/images/icon.png",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "CoverMe needs your location to update your trusted circle and emergency services during an active journey or SOS trigger.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "CoverMe requires background location access to keep your trusted contacts informed of your safety during your journey even when the app is in the background.",
         "NSCameraUsageDescription": "CoverMe needs camera access to capture your vehicle's license plate for verification.",
         "NSMicrophoneUsageDescription": "CoverMe needs microphone access for hands-free voice-activated SOS triggers."
-      }
+      },
+      "bundleIdentifier": "com.chroniclesmaan.coverme"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#2563EB",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -31,7 +32,14 @@
         "RECORD_AUDIO",
         "CAMERA",
         "SEND_SMS"
-      ]
+      ],
+      "package": "com.chroniclesmaan.coverme",
+      "googleServicesFile": "./google-services.json",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyATBfXKoyWbtvySWJqVcLv_7yls5MXq3Kk"
+        }
+      }
     },
     "web": {
       "output": "static",
@@ -39,10 +47,11 @@
     },
     "plugins": [
       "expo-router",
+      "expo-dev-client",
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#2563EB",
           "android": {
             "image": "./assets/images/splash-icon.png",
             "imageWidth": 76
@@ -54,6 +63,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "be750cf4-c4ea-484f-8c45-1ead7d145a3e"
+      }
     }
   }
 }

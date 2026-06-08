@@ -88,7 +88,7 @@ export function useLocationTracking(isTrackingActive: boolean = false) {
 
     try {
       const current = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
+        accuracy: Location.Accuracy.Highest,
       });
       const coords = {
         latitude: current.coords.latitude,

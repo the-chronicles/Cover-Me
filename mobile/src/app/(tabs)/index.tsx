@@ -207,11 +207,11 @@ export default function HomeScreen() {
           newNotifs.forEach((n: any) => {
             if (!n.read) {
               if (n.type === 'sos_alert') {
-                showToast(`⚠️ EMERGENCY SOS: ${n.message}`, 'error');
+                showToast(`EMERGENCY SOS: ${n.message}`, 'error');
               } else if (n.type === 'circle_invite') {
-                showToast(`📩 Circle Invite: ${n.message}`, 'success');
+                showToast(`Circle Invite: ${n.message}`, 'success');
               } else {
-                showToast(`🔔 ${n.title}: ${n.message}`, 'info');
+                showToast(`${n.title}: ${n.message}`, 'info');
               }
             }
           });
@@ -879,6 +879,8 @@ const styles = StyleSheet.create({
   },
   badgeRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
   statusBadge: {
     paddingHorizontal: Spacing.two,

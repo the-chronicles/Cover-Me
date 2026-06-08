@@ -35,6 +35,30 @@ export default function JourneyScreen() {
   const [activeJourney, setActiveJourney] = useState<Journey | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [cameraModalVisible, setCameraModalVisible] = useState(false);
+  const [isScanningPlate, setIsScanningPlate] = useState(false);
+
+  const runPlateOcr = async (photoUri: string) => {
+    setIsScanningPlate(true);
+    setLicensePlate('Scanning plate...');
+    try {
+      console.log('[Plate OCR] Sending image for immediate detection...');
+      const response = await apiService.detectLicensePlate(photoUri);
+      console.log('[Plate OCR] Detection result:', response);
+      if (response && response.license_plate && response.license_plate !== 'UNKNOWN-PLATE') {
+        setLicensePlate(response.license_plate);
+        showToast('License plate scanned successfully.', 'info');
+      } else {
+        setLicensePlate('');
+        showToast('Could not read plate number. Please enter manually.', 'warning');
+      }
+    } catch (err) {
+      console.warn('[Plate OCR] Immediate scanning failed:', err);
+      setLicensePlate('');
+      showToast('Could not read plate number. Please enter manually.', 'warning');
+    } finally {
+      setIsScanningPlate(false);
+    }
+  };
 
   // Hook for GPS Location Tracking (toggled on when journey is active)
   const { location, isPowerSavingMode, riskWarning } = useLocationTracking(activeJourney !== null);
@@ -86,6 +110,11 @@ export default function JourneyScreen() {
   }, []);
 
   const handleStartJourney = async () => {
+    if (isScanningPlate) {
+      showToast('Please wait for the plate scan to finish.', 'error');
+      return;
+    }
+
     if (!startLoc || !destination || !duration) {
       showToast('Please provide start location, destination, and duration.', 'error');
       return;
@@ -131,10 +160,13 @@ export default function JourneyScreen() {
       if (platePhoto) {
         setIsUploading(true);
         try {
+          console.log('[Plate Upload] Initiating photo upload for journey:', journey.id, 'URI:', platePhoto);
           const photoResponse = await apiService.uploadVehiclePhoto(journey.id, platePhoto, licensePlate);
+          console.log('[Plate Upload] Upload successful. Detected plate:', photoResponse.ocr_license_plate_detected);
           setLicensePlate(photoResponse.ocr_license_plate_detected);
           setActiveJourney(prev => prev ? { ...prev, license_plate: photoResponse.ocr_license_plate_detected } : null);
         } catch (photoErr) {
+          console.error('[Plate Upload] Photo upload failed with error:', photoErr);
           console.warn("Plate photo upload offline fallback active.");
         } finally {
           setIsUploading(false);
@@ -209,7 +241,7 @@ export default function JourneyScreen() {
               if (!result.canceled && result.assets && result.assets.length > 0) {
                 const pickedUri = result.assets[0].uri;
                 setPlatePhoto(pickedUri);
-                setLicensePlate('Verify on start...');
+                runPlateOcr(pickedUri);
               }
             } catch (err) {
               console.warn('Camera launch failed', err);
@@ -232,7 +264,7 @@ export default function JourneyScreen() {
               if (!result.canceled && result.assets && result.assets.length > 0) {
                 const pickedUri = result.assets[0].uri;
                 setPlatePhoto(pickedUri);
-                setLicensePlate('Verify on start...');
+                runPlateOcr(pickedUri);
               }
             } catch (err) {
               console.warn('Image library launch failed', err);
@@ -558,21 +590,33 @@ export default function JourneyScreen() {
                 <View style={{ width: '100%', gap: 6, marginVertical: Spacing.one }}>
                   <ThemedText type="small">License Plate Number</ThemedText>
                   <TextInput
-                    style={[styles.input, { height: 40, backgroundColor: theme.background, color: theme.text, borderColor: theme.backgroundSelected }]}
-                    placeholder="e.g. LAG-123AA (Optional)"
+                    style={[
+                      styles.input,
+                      {
+                        height: 40,
+                        backgroundColor: theme.background,
+                        color: theme.text,
+                        borderColor: theme.backgroundSelected,
+                        opacity: isScanningPlate ? 0.6 : 1
+                      }
+                    ]}
+                    placeholder={isScanningPlate ? "Scanning photo..." : "e.g. LAG-123AA (Optional)"}
                     placeholderTextColor={theme.textSecondary}
-                    value={licensePlate === 'Verify on start...' ? '' : licensePlate}
+                    value={licensePlate}
                     onChangeText={setLicensePlate}
+                    editable={!isScanningPlate}
                   />
                 </View>
 
                 {platePhoto ? (
                   <View style={styles.scannedRow}>
                     <View style={styles.scannedDetails}>
-                      <ThemedText type="small" themeColor="textSecondary">Scanned photo loaded</ThemedText>
+                      <ThemedText type="small" themeColor="textSecondary">
+                        {isScanningPlate ? "Scanning photo..." : "Scanned photo loaded"}
+                      </ThemedText>
                     </View>
-                    <Pressable onPress={() => setPlatePhoto(null)}>
-                      <ThemedText style={styles.clearText}>Clear Photo</ThemedText>
+                    <Pressable onPress={() => { setPlatePhoto(null); setLicensePlate(''); }} disabled={isScanningPlate}>
+                      <ThemedText style={[styles.clearText, { opacity: isScanningPlate ? 0.5 : 1 }]}>Clear Photo</ThemedText>
                     </Pressable>
                   </View>
                 ) : (
