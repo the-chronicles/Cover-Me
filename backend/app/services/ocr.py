@@ -1,7 +1,7 @@
 import os
 import io
 import re
-from PIL import Image
+from PIL import Image, ImageOps
 import pytesseract
 
 # Configure custom tesseract path if specified in environment
@@ -19,29 +19,58 @@ def extract_license_plate(image_bytes: bytes) -> str:
         # Load image from uploaded bytes
         img = Image.open(io.BytesIO(image_bytes))
         
+        # Transpose image based on EXIF orientation metadata to handle rotated/portrait phone photos
+        img = ImageOps.exif_transpose(img)
+        
         # Preprocess: convert to grayscale to improve Tesseract reading accuracy
         img_gray = img.convert("L")
         
-        # Run OCR extraction
-        extracted_text = pytesseract.image_to_string(img_gray)
-        print(f"[OCR engine] Extracted raw text: {repr(extracted_text)}")
+        # We will try multiple Tesseract page segmentation modes (PSM) in order of preference
+        # PSM 8: Treat the image as a single word (great for license plates)
+        # PSM 13: Raw line (treat the image as a single text line)
+        # PSM 3: Default fully automatic page segmentation (fallback)
+        psms_to_try = [8, 13, 3]
         
-        # Postprocess: Clean up text and check for plate patterns
-        cleaned_text = extracted_text.upper().strip()
-        matches = NIGERIAN_PLATE_PATTERN.search(cleaned_text)
+        fallback_text = None
         
-        if matches:
-            # Reconstruct standardized format: AAA-000-BB
-            standard_plate = f"{matches.group(1)}-{matches.group(2)}-{matches.group(3)}"
-            print(f"[OCR Engine] Standardized Plate Match Found: {standard_plate}")
-            return standard_plate
-        
-        # If regex doesn't match, attempt to return the first alphanumeric line found
-        lines = [line.strip() for line in cleaned_text.split('\n') if re.search(r'\d', line)]
-        if lines:
-            # Clean non-alphanumeric chars for standard format fallback
-            fallback_text = re.sub(r'[^A-Z0-9-]', '', lines[0])
-            print(f"[OCR Engine] Regex failed. Returning alphanumeric line match: {fallback_text}")
+        for psm in psms_to_try:
+            try:
+                config = f"--psm {psm}"
+                extracted_text = pytesseract.image_to_string(img_gray, config=config)
+                print(f"[OCR engine] Extracted raw text (PSM {psm}): {repr(extracted_text)}")
+                
+                cleaned_text = extracted_text.upper().strip()
+                if not cleaned_text:
+                    continue
+                    
+                # Check for Nigerian plate pattern
+                matches = NIGERIAN_PLATE_PATTERN.search(cleaned_text)
+                if matches:
+                    standard_plate = f"{matches.group(1)}-{matches.group(2)}-{matches.group(3)}"
+                    print(f"[OCR Engine] Standardized Plate Match Found (PSM {psm}): {standard_plate}")
+                    return standard_plate
+                
+                # If regex doesn't match, attempt to find the first line containing digits
+                lines_with_digits = [line.strip() for line in cleaned_text.split('\n') if re.search(r'\d', line)]
+                if lines_with_digits:
+                    candidate = re.sub(r'[^A-Z0-9-]', '', lines_with_digits[0])
+                    if candidate and not fallback_text:
+                        fallback_text = candidate
+                        print(f"[OCR Engine] Candidate fallback text with digits (PSM {psm}): {fallback_text}")
+                
+                # Otherwise, any alphanumeric line
+                lines_any = [line.strip() for line in cleaned_text.split('\n') if re.search(r'[A-Z0-9]', line)]
+                if lines_any:
+                    candidate = re.sub(r'[^A-Z0-9-]', '', lines_any[0])
+                    if candidate and not fallback_text:
+                        fallback_text = candidate
+                        print(f"[OCR Engine] Candidate fallback alphanumeric text (PSM {psm}): {fallback_text}")
+                        
+            except Exception as e:
+                print(f"[OCR Engine] Error running PSM {psm}: {e}")
+                
+        if fallback_text:
+            print(f"[OCR Engine] Returning fallback text: {fallback_text}")
             return fallback_text
             
         print("[OCR Engine] Could not match license plate pattern. Returning empty.")
@@ -57,3 +86,4 @@ def extract_license_plate(image_bytes: bytes) -> str:
     except Exception as e:
         print(f"[OCR Error] Image processing failed: {e}")
         return "LAG-583B-AP"
+

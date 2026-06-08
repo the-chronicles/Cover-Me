@@ -2,7 +2,7 @@ import os
 import datetime
 import hashlib
 from typing import List, Optional
-from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile, Header, Request, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile, Header, Request, BackgroundTasks, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
@@ -682,19 +682,21 @@ async def trigger_sos(
             models.CircleMember.circle_id.in_(my_circle_ids),
             models.CircleMember.user_id != current_user.id
         ).all()
-        for cm in circle_members:
-            # Create in-app notification for each circle member
+        # Deduplicate circle member user IDs to prevent duplicate notifications
+        unique_member_ids = {cm.user_id for cm in circle_members}
+        for member_id in unique_member_ids:
+            # Create in-app notification for each unique circle member
             new_notif = models.Notification(
-                user_id=cm.user_id,
+                user_id=member_id,
                 type="sos_alert",
                 title="Emergency SOS Alert!",
                 message=f"{current_user.full_name} ({current_user.phone_number}) triggered an SOS emergency alert!"
             )
             db.add(new_notif)
         db.commit()
-        for cm in circle_members:
+        for member_id in unique_member_ids:
             dispatch_push_notification(
-                user_id=cm.user_id,
+                user_id=member_id,
                 title="Emergency SOS Alert!",
                 message=f"{current_user.full_name} ({current_user.phone_number}) triggered an SOS emergency alert!",
                 db=db
@@ -709,11 +711,12 @@ async def trigger_sos(
     message_text = f"EMERGENCY! {current_user.full_name} ({current_user.phone_number}) triggered SOS at location: {location_link}. Never walk alone."
     
     # Offload SMS/WhatsApp delivery chain execution to FastAPI BackgroundTasks queue
+    # Pass user name + phone number in parentheses so it renders correctly in WhatsApp templates
     background_tasks.add_task(
         tasks.run_sos_delivery_task,
         sos_id=new_sos.id,
         contacts=contact_numbers_list,
-        user_name=current_user.full_name,
+        user_name=f"{current_user.full_name} ({current_user.phone_number})",
         location_link=location_link,
         timestamp=timestamp_str,
         sms_text=message_text
@@ -863,10 +866,68 @@ async def start_journey(
 
     return new_journey
 
+@app.post("/ocr/detect")
+async def detect_plate(
+    photo: UploadFile = File(...),
+    current_user: models.User = Depends(get_authenticated_user)
+):
+    """Run OCR detection on an uploaded vehicle photo immediately."""
+    photo_bytes = await photo.read()
+    detected_plate = extract_license_plate(photo_bytes)
+    return {"status": "success", "license_plate": detected_plate}
+
+@app.post("/admin-api/broadcast")
+async def admin_broadcast(
+    request: Request,
+    title: str = Form(...),
+    message: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    # Verify session authentication
+    if not request.session.get("admin_authenticated", False):
+        raise HTTPException(status_code=403, detail="Forbidden. Admin authentication required.")
+        
+    # Fetch all users with registered push tokens
+    users = db.query(models.User).filter(
+        models.User.push_token.isnot(None),
+        models.User.push_token != ""
+    ).all()
+    
+    if not users:
+        return {
+            "status": "success",
+            "success_count": 0,
+            "failure_count": 0,
+            "detail": "No users with active push tokens."
+        }
+        
+    success_count = 0
+    failure_count = 0
+    
+    for u in users:
+        # Personalize if {name} placeholder is used
+        personalized_msg = message.replace("{name}", u.full_name)
+        res = await messaging_service.send_push_via_expo(
+            push_token=u.push_token,
+            title=title,
+            body=personalized_msg
+        )
+        if res.get("status") == "success":
+            success_count += 1
+        else:
+            failure_count += 1
+            
+    return {
+        "status": "success",
+        "success_count": success_count,
+        "failure_count": failure_count
+    }
+
 @app.post("/journey/vehicle-photo")
 async def upload_vehicle_photo(
     journey_id: int,
     photo: UploadFile = File(...),
+    license_plate: Optional[str] = Form(None),
     current_user: models.User = Depends(get_authenticated_user),
     db: Session = Depends(get_db)
 ):
@@ -881,8 +942,11 @@ async def upload_vehicle_photo(
     # Read photo file bytes
     photo_bytes = await photo.read()
     
-    # Run Tesseract OCR extraction on raw bytes
-    detected_plate = extract_license_plate(photo_bytes)
+    # If a pre-verified license plate was provided, use it. Otherwise, perform OCR extraction.
+    if license_plate:
+        detected_plate = license_plate
+    else:
+        detected_plate = extract_license_plate(photo_bytes)
     
     # Upload photo to Cloudflare R2 / AWS S3 storage (falls back to local filesystem in dev)
     photo_url = storage.upload_vehicle_photo(photo_bytes, photo.filename)
