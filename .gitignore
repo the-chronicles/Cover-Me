@@ -1,0 +1,33 @@
+# Backend Environment & Database
+backend/.env
+backend/venv/
+backend/coverme.db
+backend/coverme.db-journal
+backend/__pycache__/
+backend/static/uploads/*
+!backend/static/uploads/.gitkeep
+
+# Mobile Dependencies & Cache
+mobile/node_modules/
+mobile/.expo/
+mobile/.vscode/
+mobile/dist/
+mobile/npm-debug.log*
+mobile/yarn-debug.log*
+mobile/yarn-error.log*
+mobile/ios/
+mobile/android/
+mobile/*.bak.jks
+mobile/*.jks
+
+# Temporary test scripts
+verify_ocr_route.py
+verify_admin_broadcast.py
+debug_gray.png
+debug_thresh.png
+debug_scaled.png
+debug_scaled_thresh.png
+
+# System Files
+.DS_Store
+Thumbs.db

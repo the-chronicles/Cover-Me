@@ -1,0 +1,24 @@
+# Python dependencies & cache
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+ENV/
+
+# Environment configurations & secrets
+.env
+
+# Database file
+coverme.db
+coverme.db-journal
+
+# Local uploads
+static/uploads/*
+!static/uploads/.gitkeep
+
+# OS & IDE files
+.DS_Store
+.vscode/
+.idea/
