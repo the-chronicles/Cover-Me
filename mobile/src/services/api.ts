@@ -5,7 +5,7 @@ import { authStorage } from './auth';
 // If running on a physical iPhone/Android device via Expo Go, replace 'localhost'
 // with your computer's local IP address (e.g., '192.168.1.50') and make sure both
 // devices are connected to the same Wi-Fi network.
-const LOCALHOST = Platform.OS === 'web' ? 'localhost' : '192.168.43.78';
+const LOCALHOST = Platform.OS === 'web' ? 'localhost' : '192.168.14.78';
 export const API_BASE_URL = `http://${LOCALHOST}:8000`;
 
 type UnauthorizedCallback = () => void;
@@ -271,7 +271,7 @@ export const apiService = {
         const token = await authStorage.getToken();
         const xhr = new XMLHttpRequest();
         xhr.open('POST', `${API_BASE_URL}/ocr/detect`);
-        
+
         if (token) {
           xhr.setRequestHeader('Authorization', `Bearer ${token}`);
         }
@@ -322,7 +322,7 @@ export const apiService = {
         const token = await authStorage.getToken();
         const xhr = new XMLHttpRequest();
         xhr.open('POST', `${API_BASE_URL}/journey/vehicle-photo?journey_id=${journeyId}`);
-        
+
         if (token) {
           xhr.setRequestHeader('Authorization', `Bearer ${token}`);
         }

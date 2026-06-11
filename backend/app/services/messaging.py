@@ -5,13 +5,13 @@ from typing import List, Dict, Any
 class MessagingService:
   def __init__(self):
     self.termii_api_key = os.getenv("TERMII_API_KEY", "YOUR_TERMII_API_KEY")
-    self.termii_sender_id = os.getenv("TERMII_SENDER_ID", "YOUR_REGISTERED_SENDER_ID")
+    self.termii_sender_id = os.getenv("TERMII_SENDER_ID", "N-Alert")
+
     
     self.meta_wa_token = os.getenv("META_WA_ACCESS_TOKEN", "YOUR_META_WA_ACCESS_TOKEN")
     self.meta_wa_phone_id = os.getenv("META_WA_PHONE_NUMBER_ID", "YOUR_META_WA_PHONE_NUMBER_ID")
     self.meta_wa_lang = os.getenv("META_WA_TEMPLATE_LANGUAGE", "en_US")
-
-  async def send_sms_via_termii(self, recipient: str, message: str) -> Dict[str, Any]:
+  async def send_sms_via_termii(self, recipient: str, message: str, sender_id: str = None) -> Dict[str, Any]:
     # Clean phone formatting (remove + prefix for Termii, e.g. +234... to 234...)
     clean_recipient = recipient.replace("+", "").strip()
     
@@ -19,6 +19,7 @@ class MessagingService:
     if self.termii_api_key == "YOUR_TERMII_API_KEY" or not self.termii_api_key:
       print(f"\n--- [TERMII SMS SIMULATION] ---")
       print(f"Recipient: {recipient}")
+      print(f"Sender: {sender_id or self.termii_sender_id}")
       print(f"Content: {message}")
       print(f"-------------------------------\n")
       return {"status": "simulated", "message": "Termii credentials not configured. SMS simulated successfully."}
@@ -26,7 +27,7 @@ class MessagingService:
     url = "https://api.ng.termii.com/api/sms/send"
     payload = {
       "to": clean_recipient,
-      "from": self.termii_sender_id,
+      "from": sender_id or self.termii_sender_id,
       "sms": message,
       "type": "plain",
       "channel": "dnd",  # Bypass DND lines in Nigeria
@@ -267,7 +268,7 @@ class MessagingService:
     
     for contact in contacts:
       # Broadcast redundant messaging (SMS and WhatsApp) for maximum delivery assurance
-      sms_res = await self.send_sms_via_termii(contact, sms_text)
+      sms_res = await self.send_sms_via_termii(contact, sms_text, sender_id="CoverMeNG")
       wa_res = await self.send_whatsapp_template_via_meta(
           recipient=contact,
           template_name="sos_alert",

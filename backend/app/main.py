@@ -82,17 +82,26 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 # --- Pydantic Schemas ---
+class SendOTPRequest(BaseModel):
+    phone_number: str
+
+class VerifyOTPRequest(BaseModel):
+    phone_number: str
+    otp_code: str
+
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
     full_name: str
     phone_number: str
+    otp_code: Optional[str] = None
 
 class UserResponse(BaseModel):
     id: int
     email: EmailStr
     full_name: str
     phone_number: str
+
 
     class Config:
         from_attributes = True
@@ -366,11 +375,122 @@ def read_root():
     }
 
 # Authentications
+@app.post("/auth/send-otp")
+async def send_otp(request_data: SendOTPRequest, db: Session = Depends(get_db)):
+    import random
+    phone = request_data.phone_number.strip()
+    
+    # Generate 6-digit OTP code
+    otp = f"{random.randint(100000, 999999)}"
+    
+    # Set expiration time (5 minutes from now)
+    expires_at = datetime.datetime.utcnow() + datetime.timedelta(minutes=5)
+    
+    # Save to database
+    db_otp = models.OTPVerification(
+        phone_number=phone,
+        otp_code=otp,
+        expires_at=expires_at,
+        verified=False
+    )
+    db.add(db_otp)
+    db.commit()
+    
+    # Send SMS via Termii with slogan
+    sms_text = f"Your CoverMe verification code is {otp}. Expires in 5 mins. never walk alone."
+    sms_res = await messaging_service.send_sms_via_termii(phone, sms_text)
+    
+    # Print code to console for easy testing/simulation access
+    print(f"\n[OTP DISPATCH] Phone: {phone} | Code: {otp} | Slogan: never walk alone.\n")
+    
+    return {
+        "status": "success",
+        "message": "OTP verification code sent",
+        "debug_simulated": sms_res.get("status") == "simulated"
+    }
+
+@app.post("/auth/verify-otp")
+def verify_otp(request_data: VerifyOTPRequest, db: Session = Depends(get_db)):
+    phone = request_data.phone_number.strip()
+    code = request_data.otp_code.strip()
+    
+    # Find active OTP record
+    otp_record = db.query(models.OTPVerification).filter(
+        models.OTPVerification.phone_number == phone,
+        models.OTPVerification.otp_code == code,
+        models.OTPVerification.expires_at >= datetime.datetime.utcnow(),
+        models.OTPVerification.verified == False
+    ).order_by(models.OTPVerification.id.desc()).first()
+    
+    if not otp_record:
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP verification code")
+    
+    # Mark as verified
+    otp_record.verified = True
+    db.commit()
+    
+    # Check if user exists
+    user = db.query(models.User).filter(models.User.phone_number == phone).first()
+    if not user:
+        return {
+            "is_new_user": True,
+            "phone_number": phone,
+            "message": "Phone verified. Proceed to registration."
+        }
+    
+    # Generate access token
+    access_token = security.create_access_token(user.id)
+    
+    # Generate refresh token
+    refresh_token_str = security.generate_secure_token()
+    token_hash = hashlib.sha256(refresh_token_str.encode()).hexdigest()
+    
+    db_token = models.RefreshToken(
+        user_id=user.id,
+        token=token_hash,
+        expires_at=datetime.datetime.utcnow() + datetime.timedelta(days=30)
+    )
+    db.add(db_token)
+    db.commit()
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token_str,
+        "token_type": "bearer",
+        "user": UserResponse.model_validate(user)
+    }
+
 @app.post("/register", response_model=UserResponse)
 def register(user_data: UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.email == user_data.email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
+        
+    db_phone = db.query(models.User).filter(models.User.phone_number == user_data.phone_number).first()
+    if db_phone:
+        raise HTTPException(status_code=400, detail="Phone number already registered")
+    
+    # OTP Verification check
+    if not user_data.otp_code:
+        # Check recently verified record
+        fifteen_mins_ago = datetime.datetime.utcnow() - datetime.timedelta(minutes=15)
+        verified_otp = db.query(models.OTPVerification).filter(
+            models.OTPVerification.phone_number == user_data.phone_number,
+            models.OTPVerification.verified == True,
+            models.OTPVerification.created_at >= fifteen_mins_ago
+        ).order_by(models.OTPVerification.id.desc()).first()
+        if not verified_otp:
+            raise HTTPException(status_code=400, detail="Phone number not verified. Please request and verify OTP first.")
+    else:
+        # Verify code directly
+        otp_record = db.query(models.OTPVerification).filter(
+            models.OTPVerification.phone_number == user_data.phone_number,
+            models.OTPVerification.otp_code == user_data.otp_code,
+            models.OTPVerification.expires_at >= datetime.datetime.utcnow()
+        ).order_by(models.OTPVerification.id.desc()).first()
+        if not otp_record:
+            raise HTTPException(status_code=400, detail="Invalid or expired OTP code")
+        otp_record.verified = True
+        db.commit()
     
     hashed_pwd = get_password_hash(user_data.password)
     new_user = models.User(
@@ -383,6 +503,7 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
     return new_user
+
 
 @app.post("/login", response_model=Token)
 def login(login_data: LoginRequest, db: Session = Depends(get_db)):

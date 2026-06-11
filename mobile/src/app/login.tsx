@@ -8,17 +8,17 @@ import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/hooks/useAuth';
 import { Link, useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/use-theme';
-
 export default function LoginScreen() {
   const theme = useTheme();
   const isDark = theme.background === '#0F172A';
   const logoSource = isDark
-    ? require('../../assets/images/CoverMe Logo slimW.png')
-    : require('../../assets/images/CoverMe Logo Dark.png');
+    ? require('@/assets/images/CoverMe Logo slimW.png')
+    : require('@/assets/images/CoverMe Logo Dark.png');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+
   const { signIn } = useAuth();
   const router = useRouter();
   const { showToast } = useAlert();
@@ -32,7 +32,6 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await signIn(email.trim().toLowerCase(), password);
-      // Auth success redirects to index screen automatically through layout routing
       router.replace('/');
     } catch (error: any) {
       showToast(error.message || 'Incorrect email or password.', 'error');
@@ -40,6 +39,7 @@ export default function LoginScreen() {
       setLoading(false);
     }
   };
+
 
   return (
     <ThemedView style={styles.container}>
@@ -185,3 +185,4 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 });
+

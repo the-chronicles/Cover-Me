@@ -76,7 +76,7 @@ async def run_sos_delivery_task(
             db.refresh(sms_log)
 
             try:
-                sms_res = await messaging_service.send_sms_via_termii(contact, sms_text)
+                sms_res = await messaging_service.send_sms_via_termii(contact, sms_text, sender_id="CoverMeNG")
                 sms_log.status = "sent" if sms_res.get("status") in ("success", "simulated") else "failed"
                 sms_log.raw_api_response = json.dumps(sms_res.get("data", sms_res))
                 if sms_log.status == "failed":
@@ -155,7 +155,7 @@ async def run_journey_start_task(
     
     print(f"[Journey Queue] Alerting emergency contact: {recipient}")
     # Dispatch SMS
-    await messaging_service.send_sms_via_termii(recipient, start_message)
+    await messaging_service.send_sms_via_termii(recipient, start_message, sender_id="CoverMeNG")
     # Dispatch WhatsApp
     await messaging_service.send_whatsapp_template_via_meta(
         recipient=recipient,

@@ -49,12 +49,12 @@ export default function JourneyScreen() {
         showToast('License plate scanned successfully.', 'info');
       } else {
         setLicensePlate('');
-        showToast('Could not read plate number. Please enter manually.', 'warning');
+        showToast('Could not read plate number. Please enter manually.', 'info');
       }
     } catch (err) {
       console.warn('[Plate OCR] Immediate scanning failed:', err);
       setLicensePlate('');
-      showToast('Could not read plate number. Please enter manually.', 'warning');
+      showToast('Could not read plate number. Please enter manually.', 'info');
     } finally {
       setIsScanningPlate(false);
     }

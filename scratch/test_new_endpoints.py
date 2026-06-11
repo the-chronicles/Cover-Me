@@ -1,7 +1,24 @@
 import time
 import httpx
+import os
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
 
+# Load env variables from backend/.env
+backend_env = os.path.abspath(os.path.join(os.path.dirname(__file__), "../backend/.env"))
+load_dotenv(backend_env)
+
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://chronicles@localhost:5432/coverme_db")
 BASE_URL = "http://localhost:8000"
+
+def get_last_otp_from_db(phone_number):
+    engine = create_engine(DATABASE_URL)
+    with engine.connect() as conn:
+        query = text("SELECT otp_code FROM otp_verifications WHERE phone_number = :phone ORDER BY id DESC LIMIT 1")
+        result = conn.execute(query, {"phone": phone_number}).fetchone()
+        if result:
+            return result[0]
+    return None
 
 def run_tests():
     print("=== STARTING NEW ENDPOINTS VERIFICATION ===")
@@ -15,13 +32,30 @@ def run_tests():
         print(f"[ERROR] Could not connect to backend at {BASE_URL}: {e}")
         return
         
-    # 2. Register a new user
+    # 2. Register a new user with OTP
     email = f"test_user_{int(time.time())}@coverme.com"
+    phone_number = f"+234803{int(time.time()) % 10000000:07d}"
+    
+    # Request OTP
+    r_send = client.post(f"{BASE_URL}/auth/send-otp", json={"phone_number": phone_number})
+    assert r_send.status_code == 200, "Send OTP failed"
+    
+    # Retrieve OTP code
+    otp_code = get_last_otp_from_db(phone_number)
+    assert otp_code is not None, "Failed to retrieve OTP code from DB"
+    
+    # Verify OTP
+    r_verify = client.post(f"{BASE_URL}/auth/verify-otp", json={
+        "phone_number": phone_number,
+        "otp_code": otp_code
+    })
+    assert r_verify.status_code == 200, "Verify OTP failed"
+    
     reg_payload = {
         "email": email,
         "password": "SecurePassword123",
         "full_name": "Active Session Tester",
-        "phone_number": f"+234803{int(time.time()) % 10000000:07d}"
+        "phone_number": phone_number
     }
     r_reg = client.post(f"{BASE_URL}/register", json=reg_payload)
     print(f"[2] Registration response: {r_reg.status_code}")
