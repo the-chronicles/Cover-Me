@@ -6,7 +6,9 @@ import { authStorage } from './auth';
 // with your computer's local IP address (e.g., '192.168.1.50') and make sure both
 // devices are connected to the same Wi-Fi network.
 const LOCALHOST = Platform.OS === 'web' ? 'localhost' : '192.168.14.78';
-export const API_BASE_URL = `http://${LOCALHOST}:8000`;
+export const API_BASE_URL = __DEV__
+  ? `http://${LOCALHOST}:8000`
+  : 'https://api.covermetech.site';
 
 type UnauthorizedCallback = () => void;
 let unauthorizedCallback: UnauthorizedCallback | null = null;

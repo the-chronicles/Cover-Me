@@ -398,7 +398,7 @@ async def send_otp(request_data: SendOTPRequest, db: Session = Depends(get_db)):
     
     # Send SMS via Termii with slogan
     sms_text = f"Your CoverMe verification code is {otp}. Expires in 5 mins. never walk alone."
-    sms_res = await messaging_service.send_sms_via_termii(phone, sms_text)
+    sms_res = await messaging_service.send_sms_via_termii(phone, sms_text, sender_id="N-Alert")
     
     # Print code to console for easy testing/simulation access
     print(f"\n[OTP DISPATCH] Phone: {phone} | Code: {otp} | Slogan: never walk alone.\n")
